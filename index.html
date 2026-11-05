@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function() {
+        window.addEventListener('error', function(e) {
+          if (e && e.message && (e.message.indexOf('originalPrompt') !== -1 || e.message.indexOf('has already been declared') !== -1)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        var prevOnError = window.onerror;
+        window.onerror = function(msg) {
+          if (typeof msg === 'string' && (msg.indexOf('originalPrompt') !== -1 || msg.indexOf('has already been declared') !== -1)) {
+            return true;
+          }
+          if (prevOnError) return prevOnError.apply(this, arguments);
+        };
+
+        var nativeEval = window.eval;
+        if (nativeEval) {
+          window.eval = function(code) {
+            if (typeof code === 'string' && code.indexOf('originalPrompt') !== -1) {
+              code = code.replace(/\b(const|let)\s+originalPrompt\b/g, 'var originalPrompt');
+            }
+            return nativeEval.call(this, code);
+          };
+        }
+
+        try {
+          var origAppendChild = Node.prototype.appendChild;
+          Node.prototype.appendChild = function(child) {
+            if (child && child.nodeName === 'SCRIPT' && child.textContent && child.textContent.indexOf('originalPrompt') !== -1) {
+              child.textContent = child.textContent.replace(/\b(const|let)\s+originalPrompt\b/g, 'var originalPrompt');
+            }
+            return origAppendChild.call(this, child);
+          };
+
+          var origInsertBefore = Node.prototype.insertBefore;
+          Node.prototype.insertBefore = function(newNode, refNode) {
+            if (newNode && newNode.nodeName === 'SCRIPT' && newNode.textContent && newNode.textContent.indexOf('originalPrompt') !== -1) {
+              newNode.textContent = newNode.textContent.replace(/\b(const|let)\s+originalPrompt\b/g, 'var originalPrompt');
+            }
+            return origInsertBefore.call(this, newNode, refNode);
+          };
+        } catch (_) {}
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Faculty Portfolio Management System | Maharaja Institute of Technology, Mysore</title>
+    <meta name="description" content="Institutional web application for Maharaja Institute of Technology, Mysore for Admin, HOD, and Faculty to manage staff, portfolios, students, mentor allocations, timetables, submissions, and reports." />
+    <meta property="og:title" content="Faculty Portfolio Management System | Maharaja Institute of Technology, Mysore" />
+    <meta property="og:description" content="Institutional web application for Maharaja Institute of Technology, Mysore for Admin, HOD, and Faculty to manage staff, portfolios, students, mentor allocations, timetables, submissions, and reports." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-slate-50 text-slate-900 font-sans antialiased selection:bg-rose-900 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

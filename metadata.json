@@ -1,0 +1,6 @@
+{
+  "name": "Faculty Portfolio Management System (FPMS) - MIT Mysore",
+  "description": "Institutional web application for Maharaja Institute of Technology, Mysore for Admin, HOD, and Faculty to manage staff, portfolios, students, mentor allocations, timetables, submissions, and reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
