@@ -1,4 +1,4 @@
-import {
+import type {
   SectionAllocationBand,
   SectionConfig,
   AllocatedStudent,
@@ -92,28 +92,12 @@ export function calculateBalancedSectionSizes(
     return { targets: {}, isValid: false, error: 'At least one section must be configured.' };
   }
 
-  const totalCapacity = sections.reduce((sum, s) => sum + s.capacity, 0);
-  if (totalCapacity < totalStudents) {
-    return {
-      targets: {},
-      isValid: false,
-      error: `Total section capacity (${totalCapacity}) is insufficient for eligible cohort (${totalStudents} students). Please increase section capacities.`,
-    };
-  }
-
   const base = Math.floor(totalStudents / k);
   const remainder = totalStudents % k;
   const targets: Record<string, number> = {};
 
   for (let i = 0; i < k; i++) {
     const count = base + (i < remainder ? 1 : 0);
-    if (count > sections[i].capacity) {
-      return {
-        targets: {},
-        isValid: false,
-        error: `Section "${sections[i].name}" has capacity ${sections[i].capacity}, which is less than the balanced target of ${count} students.`,
-      };
-    }
     targets[sections[i].name] = count;
   }
 

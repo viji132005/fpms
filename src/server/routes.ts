@@ -1,17 +1,17 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import {
   db,
-  User,
-  AuditLog,
-  Notification,
-  Department,
-  StaffProfile,
-  Student,
-  MentorAllocation,
-  Task,
-  StructuredTimetable,
-  AcademicSubject,
-  SubjectAllocationRecord,
+  type User,
+  type AuditLog,
+  type Notification,
+  type Department,
+  type StaffProfile,
+  type Student,
+  type MentorAllocation,
+  type Task,
+  type StructuredTimetable,
+  type AcademicSubject,
+  type SubjectAllocationRecord,
 } from './db.ts';
 import { calculateBalancedMentorAllocation, calculateCombinedMultiYearAllocation } from '../utils/allocation.ts';
 import {
@@ -36,7 +36,7 @@ import {
   exportSectionAllocationWorkbook,
   exportSectionAllocationCsv,
 } from '../utils/sectionAllocationExcel.ts';
-import { StudentSectionAllocationRun } from '../types/index.ts';
+import type { StudentSectionAllocationRun } from '../types/index.ts';
 import { validateSubmissionTransition } from '../utils/taskStateMachine.ts';
 import { calculateProfileCompleteness } from '../utils/completeness.ts';
 import { generateGroundedGeminiReport, generateDeterministicReport, consultReportAssistant } from './gemini.ts';
@@ -46,8 +46,8 @@ import {
   canPublishTimetable,
   generateAutomatedTimetableGrid,
   extractFacultyPersonalSchedule,
-  FacultyAssignment,
-  TimetableSlot,
+  type FacultyAssignment,
+  type TimetableSlot,
 } from '../utils/timetableValidation.ts';
 import {
   getInitialAcademicSubjects,
@@ -1529,7 +1529,13 @@ apiRouter.get('/students', authMiddleware, (req: AuthenticatedRequest, res: Resp
   }
 
   if (year) {
-    students = students.filter((s) => s.currentYear === Number(year));
+    const yrNum = Number(year);
+    students = students.filter((s) => {
+      if (s.currentYear !== yrNum) return false;
+      // If a specific status was requested, allow it; otherwise exclude GRADUATED alumni from active year cohorts
+      if (!status && s.status === 'GRADUATED') return false;
+      return true;
+    });
   }
 
   if (status) {
@@ -1628,6 +1634,52 @@ apiRouter.post(
     );
 
     return res.status(201).json(newStudent);
+  }
+);
+
+apiRouter.post(
+  '/students/clear-all',
+  authMiddleware,
+  requireRole(['ADMIN', 'HOD']),
+  (req: AuthenticatedRequest, res: Response) => {
+    const { departmentId } = req.body;
+    const data = db.getData();
+    const deptId = departmentId || (req.user?.role === 'HOD' ? req.user?.departmentId : 'dept-ise');
+
+    const previousCount = data.students.filter((s) => !deptId || s.departmentId === deptId).length;
+    data.students = data.students.filter((s) => deptId && s.departmentId !== deptId);
+    data.studentPromotionHistory = (data.studentPromotionHistory || []).filter(
+      (h: any) => deptId && h.departmentId !== deptId
+    );
+
+    if (data.mentorAllocations) {
+      data.mentorAllocations.forEach((a) => {
+        if (!deptId || a.departmentId === deptId) {
+          if (a.groups) {
+            a.groups.forEach((g) => {
+              g.studentIds = [];
+            });
+          }
+        }
+      });
+    }
+
+    db.save();
+
+    logAudit(
+      { id: req.user!.id, email: req.user!.email, role: req.user!.role },
+      'CLEAR_ALL_STUDENTS',
+      'STUDENT',
+      deptId || 'all',
+      `Cleared ${previousCount} student records from department ${deptId} for clean testing from scratch.`,
+      req
+    );
+
+    return res.json({
+      success: true,
+      message: `Successfully cleared ${previousCount} student records. Database is now clean for fresh input.`,
+      clearedCount: previousCount,
+    });
   }
 );
 
@@ -1934,6 +1986,16 @@ apiRouter.post(
 
     const data = db.getData();
     const currentAcademicYear = academicYear || data.institution.currentAcademicYear;
+
+    const activeDeptStudents = data.students.filter(
+      (s) => s.departmentId === departmentId && s.status === 'ACTIVE'
+    );
+    if (activeDeptStudents.length === 0) {
+      return res.status(400).json({
+        error:
+          '1st, 2nd, 3rd, and 4th year cohort details are empty. You cannot perform cohort promotion without active students.',
+      });
+    }
 
     const { updatedStudents, historyRecords, summary } = executeSemesterProgression(
       data.students,

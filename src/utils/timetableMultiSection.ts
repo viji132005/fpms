@@ -2,7 +2,7 @@
  * Pure functions for Year/Semester mapping, multi-section schedule grids,
  * and cross-section clash detection according to MIT Mysore institutional rules.
  */
-import { TimetableSlot, SubjectAllocationRecord } from '../types/index.ts';
+import type { TimetableSlot, SubjectAllocationRecord } from '../types/index.ts';
 
 export interface SectionSchedule {
   section: string; // 'Section A', 'Section B', 'Section C', 'Section D'

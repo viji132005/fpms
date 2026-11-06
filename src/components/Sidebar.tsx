@@ -47,7 +47,6 @@ export const Sidebar: React.FC = () => {
       { id: 'timetables', label: 'Timetable Management', icon: <CalendarDays className="w-4 h-4" /> },
       { id: 'feed', label: 'Institutional Feed', icon: <Rss className="w-4 h-4" /> },
       { id: 'notifications', label: 'Notifications & Circulars', icon: <Bell className="w-4 h-4" />, badge: unreadCount },
-      { id: 'settings', label: 'Institution Settings', icon: <Settings className="w-4 h-4" /> },
       { id: 'security', label: 'Account & Security', icon: <KeyRound className="w-4 h-4" /> },
     ];
   } else if (user.role === 'HOD') {

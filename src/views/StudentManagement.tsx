@@ -78,9 +78,69 @@ export const StudentManagement: React.FC = () => {
   const [promotionPlan, setPromotionPlan] = useState<any>(null);
   const [cascadePlan, setCascadePlan] = useState<any>(null);
   const [isPromoting, setIsPromoting] = useState(false);
+  const [showConfirmCohortStep, setShowConfirmCohortStep] = useState(false);
   const [cascadeSuccessMsg, setCascadeSuccessMsg] = useState<string | null>(null);
   const [cascadeErrorMsg, setCascadeErrorMsg] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
+
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
+  const [isClearingStudents, setIsClearingStudents] = useState(false);
+
+  // Active semester & student counts per year (1st, 2nd, 3rd, 4th Year) + graduated count
+  const [deptYearStats, setDeptYearStats] = useState<Record<number, { count: number; activeSem: number }>>({
+    1: { count: 0, activeSem: 1 },
+    2: { count: 0, activeSem: 3 },
+    3: { count: 0, activeSem: 5 },
+    4: { count: 0, activeSem: 7 },
+  });
+  const [graduatedCount, setGraduatedCount] = useState<number>(0);
+
+  const fetchDeptStats = async () => {
+    try {
+      const res = await authFetch(`/api/students?departmentId=${encodeURIComponent(deptId)}`);
+      if (res.ok) {
+        const all: Student[] = await res.json();
+
+        // Determine whether department is currently running in ODD or EVEN semester term
+        const activeStudents = all.filter((s) => s.status === 'ACTIVE');
+        let oddCount = 0;
+        let evenCount = 0;
+        activeStudents.forEach((s) => {
+          const sem = s.currentSemester || (s.currentYear ? s.currentYear * 2 - 1 : 1);
+          if (sem % 2 === 1) oddCount++;
+          else evenCount++;
+        });
+        const deptCycle: 'ODD' | 'EVEN' = evenCount > oddCount && activeStudents.length > 0 ? 'EVEN' : 'ODD';
+
+        const stats: Record<number, { count: number; activeSem: number }> = {
+          1: { count: 0, activeSem: deptCycle === 'EVEN' ? 2 : 1 },
+          2: { count: 0, activeSem: deptCycle === 'EVEN' ? 4 : 3 },
+          3: { count: 0, activeSem: deptCycle === 'EVEN' ? 6 : 5 },
+          4: { count: 0, activeSem: deptCycle === 'EVEN' ? 8 : 7 },
+        };
+
+        [1, 2, 3, 4].forEach((yr) => {
+          const yrStudents = all.filter((s) => s.currentYear === yr && s.status === 'ACTIVE');
+          stats[yr].count = yrStudents.length;
+          if (yrStudents.length > 0) {
+            const semCount: Record<number, number> = {};
+            yrStudents.forEach((s) => {
+              const sem = s.currentSemester || (deptCycle === 'EVEN' ? yr * 2 : yr * 2 - 1);
+              semCount[sem] = (semCount[sem] || 0) + 1;
+            });
+            const top = Object.entries(semCount).sort((a, b) => b[1] - a[1])[0];
+            stats[yr].activeSem = top ? Number(top[0]) : deptCycle === 'EVEN' ? yr * 2 : yr * 2 - 1;
+          } else {
+            stats[yr].activeSem = deptCycle === 'EVEN' ? yr * 2 : yr * 2 - 1;
+          }
+        });
+        setDeptYearStats(stats);
+        setGraduatedCount(all.filter((s) => s.status === 'GRADUATED').length);
+      }
+    } catch (e) {
+      console.error('Error fetching department year stats', e);
+    }
+  };
 
   const fetchStudents = () => {
     setIsLoading(true);
@@ -106,6 +166,7 @@ export const StudentManagement: React.FC = () => {
 
   useEffect(() => {
     fetchStudents();
+    fetchDeptStats();
   }, [activeTab, selectedStatus, search, deptId]);
 
   const handleOpenAddModal = () => {
@@ -334,6 +395,7 @@ export const StudentManagement: React.FC = () => {
   const handleOpenPromotionModal = async (fromYr: number) => {
     setPromotionFromYear(fromYr);
     setPromotionMode('semester');
+    setShowConfirmCohortStep(false);
     setCascadeSuccessMsg(null);
     setCascadeErrorMsg(null);
     setShowPromotionModal(true);
@@ -563,29 +625,65 @@ export const StudentManagement: React.FC = () => {
                 </button>
               )}
 
+              {(() => {
+                const totalActiveEligible =
+                  (deptYearStats[1]?.count || 0) +
+                  (deptYearStats[2]?.count || 0) +
+                  (deptYearStats[3]?.count || 0) +
+                  (deptYearStats[4]?.count || 0);
+                const isCohortEmpty = totalActiveEligible === 0;
+
+                return (
+                  <button
+                    disabled={isCohortEmpty}
+                    onClick={() =>
+                      handleOpenPromotionModal(typeof activeTab === 'number' ? activeTab : 4)
+                    }
+                    title={
+                      isCohortEmpty
+                        ? '1st, 2nd, 3rd, and 4th year cohort details are empty. Add or import students to perform cohort promotion.'
+                        : 'Execute Controlled Sequential Cohort Promotion across running semesters'
+                    }
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg shadow-sm flex items-center gap-1.5 transition-colors ${
+                      isCohortEmpty
+                        ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                        : 'text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-300 cursor-pointer'
+                    }`}
+                  >
+                    <ArrowUpRight className={`w-3.5 h-3.5 ${isCohortEmpty ? 'text-slate-400' : 'text-blue-700'}`} />
+                    <span>Controlled Cohort Promotion</span>
+                  </button>
+                );
+              })()}
+
               <button
-                onClick={() =>
-                  handleOpenPromotionModal(typeof activeTab === 'number' ? activeTab : 4)
-                }
-                className="px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-300 rounded-lg shadow-sm flex items-center gap-1.5 transition-colors"
+                type="button"
+                onClick={() => setShowClearConfirmModal(true)}
+                title="Clear all student records to test fresh inputs/uploads from scratch"
+                className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
               >
-                <ArrowUpRight className="w-3.5 h-3.5 text-blue-700" />
-                <span>Controlled Cohort Promotion</span>
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Reset / Clear Students</span>
               </button>
             </div>
           )}
         </div>
 
         {/* 5 Structural Boxes: 1st, 2nd, 3rd, 4th, Graduated Alumni */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {[
-            { id: 1, label: '1st Year', sem: 'Sem I & II' },
-            { id: 2, label: '2nd Year', sem: 'Sem III & IV' },
-            { id: 3, label: '3rd Year', sem: 'Sem V & VI' },
-            { id: 4, label: '4th Year', sem: 'Sem VII & VIII' },
-            { id: 'graduated', label: 'Previous Graduated', sem: 'Alumni Cohorts' },
+            { id: 1, label: '1st Year', oddSem: 1, evenSem: 2 },
+            { id: 2, label: '2nd Year', oddSem: 3, evenSem: 4 },
+            { id: 3, label: '3rd Year', oddSem: 5, evenSem: 6 },
+            { id: 4, label: '4th Year', oddSem: 7, evenSem: 8 },
+            { id: 'graduated', label: 'Previous Graduated', oddSem: 0, evenSem: 0 },
           ].map((item) => {
             const isSelected = activeTab === item.id;
+            const isYear = typeof item.id === 'number';
+            const yearNum = isYear ? (item.id as number) : 0;
+            const currentSem = isYear ? deptYearStats[yearNum]?.activeSem : 0;
+            const count = isYear ? (deptYearStats[yearNum]?.count || 0) : 0;
+
             return (
               <button
                 key={item.id}
@@ -593,25 +691,68 @@ export const StudentManagement: React.FC = () => {
                   setActiveTab(item.id as any);
                   setSelectedStatus('');
                 }}
-                className={`p-3 rounded-xl border text-left transition-all ${
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                   isSelected
                     ? 'bg-[#7B1113]/5 border-[#7B1113] text-[#7B1113] shadow-sm ring-1 ring-[#7B1113]'
-                    : 'bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
                 }`}
               >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-xs">{item.label}</span>
+                {/* Upper part: Year label on top, count placed BELOW without parenthesis */}
+                <div className="flex items-start justify-between mb-1.5 w-full">
+                  <div>
+                    <div className="font-bold text-xs text-slate-900 leading-tight">
+                      {item.label}
+                    </div>
+                    <div className="text-[11px] font-medium text-slate-500 mt-0.5">
+                      {isYear ? count : graduatedCount} Students
+                    </div>
+                  </div>
                   <div
-                    className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${
+                    className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] mt-0.5 shrink-0 ${
                       isSelected
                         ? 'bg-[#7B1113] border-[#7B1113] text-white'
-                        : 'border-slate-300 bg-white'
+                        : 'border-slate-300 bg-white text-transparent'
                     }`}
                   >
-                    {isSelected && <CheckCircle className="w-3 h-3" />}
+                    <CheckCircle className="w-3 h-3" />
                   </div>
                 </div>
-                <div className="text-[11px] text-slate-500">{item.sem}</div>
+
+                {/* Horizontal line divider */}
+                <div className="border-t border-slate-200 my-2" />
+
+                {/* Lower part: Divided horizontally into 2 boxes for each semester */}
+                {isYear ? (
+                  <div className="grid grid-cols-2 gap-1.5 w-full">
+                    {/* Left Box: Odd Semester */}
+                    <div
+                      className={`py-1.5 px-2 text-center rounded-lg text-[11px] font-semibold transition-all ${
+                        currentSem === item.oddSem
+                          ? 'bg-[#7B1113] text-white font-bold shadow ring-2 ring-[#7B1113]/30'
+                          : 'bg-slate-100 text-slate-500 font-medium border border-slate-200/80 hover:bg-slate-200/60'
+                      }`}
+                      title={currentSem === item.oddSem ? `Current Running Term: Sem ${item.oddSem}` : `Sem ${item.oddSem}`}
+                    >
+                      Sem {item.oddSem}
+                    </div>
+
+                    {/* Right Box: Even Semester */}
+                    <div
+                      className={`py-1.5 px-2 text-center rounded-lg text-[11px] font-semibold transition-all ${
+                        currentSem === item.evenSem
+                          ? 'bg-[#7B1113] text-white font-bold shadow ring-2 ring-[#7B1113]/30'
+                          : 'bg-slate-100 text-slate-500 font-medium border border-slate-200/80 hover:bg-slate-200/60'
+                      }`}
+                      title={currentSem === item.evenSem ? `Current Running Term: Sem ${item.evenSem}` : `Sem ${item.evenSem}`}
+                    >
+                      Sem {item.evenSem}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-1.5 px-2 text-center rounded-lg text-[11px] bg-slate-100 text-slate-600 font-medium border border-slate-200">
+                    Alumni Cohorts
+                  </div>
+                )}
               </button>
             );
           })}
@@ -664,7 +805,6 @@ export const StudentManagement: React.FC = () => {
                 <th className="py-3 px-3 text-center w-14">Sl. No.</th>
                 <th className="py-3 px-4">USN & Candidate</th>
                 <th className="py-3 px-3 text-center">Current Sem & Year</th>
-                <th className="py-3 px-3 text-center">Section</th>
                 <th className="py-3 px-4">Email</th>
                 <th className="py-3 px-4">Student Phone</th>
                 <th className="py-3 px-4 font-bold text-slate-700">Parent Phone No</th>
@@ -675,13 +815,13 @@ export const StudentManagement: React.FC = () => {
             <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-400">
+                  <td colSpan={8} className="py-8 text-center text-slate-400">
                     Loading student records...
                   </td>
                 </tr>
               ) : students.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-500">
+                  <td colSpan={8} className="py-8 text-center text-slate-500">
                     No students found in this cohort.
                   </td>
                 </tr>
@@ -716,12 +856,6 @@ export const StudentManagement: React.FC = () => {
                             </span>
                           </div>
                         )}
-                      </td>
-
-                      <td className="py-3 px-3 text-center">
-                        <span className="inline-flex px-2 py-0.5 rounded font-semibold text-[11px] bg-slate-100 text-slate-800 border border-slate-200">
-                          {student.section || 'Unallotted'}
-                        </span>
                       </td>
 
                       <td className="py-3 px-4 font-mono text-[11px] text-slate-600">
@@ -980,34 +1114,17 @@ export const StudentManagement: React.FC = () => {
             )}
 
             <form onSubmit={handleEditStudent} className="space-y-3.5 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">USN</label>
-                  <input
-                    type="text"
-                    required
-                    value={editingStudent.usn}
-                    onChange={(e) =>
-                      setEditingStudent({ ...editingStudent, usn: e.target.value.toUpperCase() })
-                    }
-                    className="w-full px-3 py-1.5 font-mono uppercase border border-slate-300 rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Section</label>
-                  <select
-                    value={editingStudent.section || 'Section A'}
-                    onChange={(e) =>
-                      setEditingStudent({ ...editingStudent, section: e.target.value })
-                    }
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg"
-                  >
-                    <option value="Section A">Section A</option>
-                    <option value="Section B">Section B</option>
-                    <option value="Section C">Section C</option>
-                    <option value="Section D">Section D</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">USN</label>
+                <input
+                  type="text"
+                  required
+                  value={editingStudent.usn}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, usn: e.target.value.toUpperCase() })
+                  }
+                  className="w-full px-3 py-1.5 font-mono uppercase border border-slate-300 rounded-lg"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1256,37 +1373,11 @@ export const StudentManagement: React.FC = () => {
               </button>
             </div>
 
-            {/* Mode Switch Tabs */}
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl mb-4 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => setPromotionMode('semester')}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-center transition-all cursor-pointer ${
-                  promotionMode === 'semester'
-                    ? 'bg-white text-slate-900 shadow-sm font-bold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                VTU Semester Progression (All Batches)
-              </button>
-              <button
-                type="button"
-                onClick={() => setPromotionMode('cascade')}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-center transition-all cursor-pointer ${
-                  promotionMode === 'cascade'
-                    ? 'bg-white text-slate-900 shadow-sm font-bold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Annual Cascade (Year 4 → Alumni)
-              </button>
-            </div>
-
             {cascadeSuccessMsg && (
               <div className="mb-4 p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-900 text-xs flex items-start gap-2">
                 <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                 <div>
-                  <div className="font-bold">Promotion / Progression Succeeded!</div>
+                  <div className="font-bold">Promotion Succeeded!</div>
                   <div className="text-[11px] mt-0.5">{cascadeSuccessMsg}</div>
                 </div>
               </div>
@@ -1302,193 +1393,159 @@ export const StudentManagement: React.FC = () => {
               </div>
             )}
 
-            {/* TAB 1: VTU SEMESTER PROGRESSION (SIMULTANEOUS) */}
-            {promotionMode === 'semester' && (
-              <div className="space-y-4 text-xs">
-                <div className="p-3.5 bg-rose-50/70 border border-rose-200 rounded-xl text-rose-950 space-y-1.5">
-                  <div className="font-bold flex items-center justify-between">
-                    <span className="flex items-center gap-1.5 text-[#7B1113]">
-                      <GraduationCap className="w-4 h-4" />
-                      Detected Cycle: {semesterPlan?.cycle === 'ODD' ? 'ODD to EVEN Semesters' : 'EVEN to ODD + Graduation'}
-                    </span>
-                    <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-rose-100 text-[#7B1113]">
-                      {semesterPlan?.eligibleStudentsCount ?? 0} Eligible Students
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-700 leading-relaxed">
-                    VTU examinations run simultaneously for all semesters. When progressing, all active cohorts advance concurrently:
-                    {semesterPlan?.cycle === 'ODD'
-                      ? ' Semesters 1, 3, 5, 7 advance to Semesters 2, 4, 6, 8.'
-                      : ' Semesters 2, 4, 6 advance to 3, 5, 7, and 8th semester seniors become Graduated Alumni.'}
-                  </p>
+            {/* Unified Sequential Promotion Workflow */}
+            <div className="space-y-4 text-xs">
+              <div className="p-3.5 bg-rose-50/70 border border-rose-200 rounded-xl text-rose-950 space-y-1.5">
+                <div className="font-bold flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-[#7B1113]">
+                    <GraduationCap className="w-4 h-4" />
+                    <span>Current Stage: {semesterPlan?.cycle === 'ODD' ? 'Odd Semester Term' : 'Even Semester Term'}</span>
+                  </span>
+                  <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-rose-100 text-[#7B1113]">
+                    {semesterPlan?.eligibleStudentsCount ?? 0} Active Eligible Students
+                  </span>
                 </div>
+                <p className="text-[11px] text-slate-700 leading-relaxed">
+                  Promoting advances all batches sequentially to the next academic term:
+                  {semesterPlan?.cycle === 'ODD'
+                    ? ' 1st Sem ➔ 2nd Sem, 3rd Sem ➔ 4th Sem, 5th Sem ➔ 6th Sem, 7th Sem ➔ 8th Sem.'
+                    : ' 2nd Sem ➔ 2nd Year 3rd Sem, 4th Sem ➔ 3rd Year 5th Sem, 6th Sem ➔ 4th Year 7th Sem, and 8th Sem seniors graduate to alumni.'}
+                </p>
+              </div>
 
-                {/* Progression Stages List */}
-                <div className="space-y-2">
-                  {semesterPlan?.moves?.map((m: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <span className="w-6 h-6 rounded-full bg-[#7B1113] text-white flex items-center justify-center font-bold text-[10px]">
-                          {idx + 1}
-                        </span>
-                        <div>
-                          <div className="font-bold text-slate-900">
-                            {m.action}
-                          </div>
-                          <div className="text-[10px] text-slate-500">
-                            {m.toSemester === 9
-                              ? 'Status updated to GRADUATED alumni (permanently archived)'
-                              : `From Year ${m.fromYear} to Year ${m.toYear}`}
-                          </div>
+              {/* Progression Stages List */}
+              <div className="space-y-2">
+                {semesterPlan?.moves?.map((m: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-6 h-6 rounded-full bg-[#7B1113] text-white flex items-center justify-center font-bold text-[10px]">
+                        {idx + 1}
+                      </span>
+                      <div>
+                        <div className="font-bold text-slate-900">
+                          {m.action}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          {m.toSemester === 9
+                            ? 'Status updated to GRADUATED alumni (permanently archived)'
+                            : `Advances student batch into Year ${m.toYear}`}
                         </div>
                       </div>
-                      <span className="font-mono font-bold text-xs px-2.5 py-1 rounded bg-slate-200 text-slate-800">
-                        {m.studentCount} students
+                    </div>
+                    <span className="font-mono font-bold text-xs px-2.5 py-1 rounded bg-slate-200 text-slate-800">
+                      {m.studentCount} students
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {(!semesterPlan || semesterPlan.eligibleStudentsCount === 0) && (
+                <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold">Cohort Progression Unavailable</div>
+                    <div className="text-[11px] mt-0.5 text-amber-800">
+                      1st, 2nd, 3rd, and 4th year cohort details are currently empty. You cannot perform cohort promotion until active students are enrolled or imported.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showConfirmCohortStep ? (
+                /* Pre-Commit Confirmation Cohortion Dialog */
+                <div className="p-4 bg-amber-50/80 border-2 border-amber-300 rounded-xl space-y-3 animate-in fade-in-50">
+                  <div className="flex items-start gap-2.5">
+                    <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-bold text-sm text-amber-950">
+                        Confirm Cohort Progression & Alumni Replacement
+                      </div>
+                      <p className="text-[11px] text-amber-900 mt-1 leading-relaxed">
+                        Please review and confirm this cohort transition before committing:
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-3 rounded-lg border border-amber-200 text-slate-800 space-y-1.5 font-medium text-[11px]">
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-slate-600">Transition Cycle:</span>
+                      <span className="font-bold text-[#7B1113]">
+                        {semesterPlan?.cycle === 'ODD' ? 'Odd ➔ Even Term' : 'Even ➔ Next Year Odd Term (Annual Rollover)'}
                       </span>
                     </div>
-                  ))}
-                </div>
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-slate-600">Students to Promote:</span>
+                      <span className="font-bold font-mono">{semesterPlan?.eligibleStudentsCount ?? 0} active students</span>
+                    </div>
+                    {semesterPlan?.willGraduateCount > 0 && (
+                      <div className="p-2 bg-purple-50 border border-purple-200 rounded text-purple-950 text-[11px] space-y-1 mt-2">
+                        <div className="font-bold flex items-center gap-1.5 text-purple-900">
+                          <GraduationCap className="w-4 h-4 text-purple-700" />
+                          <span>Previous Graduated Alumni Replacement Notice</span>
+                        </div>
+                        <p className="text-[10px] text-purple-800 leading-relaxed">
+                          {semesterPlan.willGraduateCount} graduating 4th-year students (8th Sem) will move into <strong>Previous Graduated</strong>, replacing the older graduated batch. 3rd-year students will move into 4th Year.
+                        </p>
+                      </div>
+                    )}
+                  </div>
 
+                  <p className="text-[11px] text-slate-600 font-medium">
+                    Are you sure you want to commit this cohort promotion now?
+                  </p>
+
+                  <div className="pt-2 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={isPromoting}
+                      onClick={() => setShowConfirmCohortStep(false)}
+                      className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl cursor-pointer"
+                    >
+                      Back / Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPromoting}
+                      onClick={async () => {
+                        await handleExecuteSemesterProgression();
+                        setShowConfirmCohortStep(false);
+                        await fetchDeptStats();
+                      }}
+                      className="px-4 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl shadow-md disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      <span>{isPromoting ? 'Committing Cohort...' : 'Yes, Confirm & Commit Cohort'}</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
                 <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setShowPromotionModal(false)}
-                    className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                    className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
                   >
                     Close
                   </button>
                   <button
                     type="button"
-                    disabled={isPromoting || !semesterPlan || semesterPlan.eligibleStudentsCount === 0}
-                    onClick={handleExecuteSemesterProgression}
+                    disabled={isPromoting || !semesterPlan || (semesterPlan.eligibleStudentsCount ?? 0) === 0}
+                    onClick={() => setShowConfirmCohortStep(true)}
                     className="px-4 py-2 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-xl shadow-md disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
                   >
                     <ArrowUpRight className="w-4 h-4" />
                     <span>
                       {isPromoting
                         ? 'Advancing Cohorts...'
-                        : `Execute Semester Progression (${semesterPlan?.cycle || 'ODD'} → ${semesterPlan?.cycle === 'ODD' ? 'EVEN' : 'ODD'})`}
+                        : `Promote Cohorts (${semesterPlan?.cycle === 'ODD' ? 'Odd ➔ Even' : 'Even ➔ Next Year Odd / Graduate'})`}
                     </span>
                   </button>
                 </div>
-              </div>
-            )}
-
-            {/* TAB 2: ANNUAL CASCADE PROMOTION */}
-            {promotionMode === 'cascade' && (
-              <div className="space-y-4 text-xs">
-                <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl text-blue-900 space-y-2">
-                  <div className="font-bold flex items-center gap-1.5 text-blue-950">
-                    <ShieldAlert className="w-4 h-4 text-blue-700" />
-                    <span>Institutional Reverse Cascade (Collision-Free):</span>
-                  </div>
-                  <p className="text-[11px] text-blue-800 leading-relaxed">
-                    Undergraduate progression executes in reverse senior order so each incoming cohort moves into an empty year without collisions:
-                  </p>
-                </div>
-
-                {/* 4 Interactive Stages Preview */}
-                <div className="space-y-2">
-                  <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-[10px]">
-                        1
-                      </span>
-                      <div>
-                        <div className="font-bold text-slate-800">
-                          Year 4 → Graduated Alumni
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          Graduating seniors move to alumni, leaving 4th Year empty
-                        </div>
-                      </div>
-                    </div>
-                    <span className="font-mono font-bold text-xs px-2.5 py-1 rounded bg-slate-200 text-slate-800">
-                      {cascadePlan?.year4?.graduating ?? 0} students
-                    </span>
-                  </div>
-
-                  <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-[10px]">
-                        2
-                      </span>
-                      <div>
-                        <div className="font-bold text-slate-800">
-                          Year 3 → Year 4
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          3rd year juniors advance into the newly vacated 4th year
-                        </div>
-                      </div>
-                    </div>
-                    <span className="font-mono font-bold text-xs px-2.5 py-1 rounded bg-slate-200 text-slate-800">
-                      {cascadePlan?.year3?.promotingToYear4 ?? 0} students
-                    </span>
-                  </div>
-
-                  <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-[10px]">
-                        3
-                      </span>
-                      <div>
-                        <div className="font-bold text-slate-800">
-                          Year 2 → Year 3
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          2nd year sophomores advance into the newly vacated 3rd year
-                        </div>
-                      </div>
-                    </div>
-                    <span className="font-mono font-bold text-xs px-2.5 py-1 rounded bg-slate-200 text-slate-800">
-                      {cascadePlan?.year2?.promotingToYear3 ?? 0} students
-                    </span>
-                  </div>
-
-                  <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-[10px]">
-                        4
-                      </span>
-                      <div>
-                        <div className="font-bold text-slate-800">
-                          Year 1 → Year 2
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          1st year freshmen advance into the newly vacated 2nd year
-                        </div>
-                      </div>
-                    </div>
-                    <span className="font-mono font-bold text-xs px-2.5 py-1 rounded bg-slate-200 text-slate-800">
-                      {cascadePlan?.year1?.promotingToYear2 ?? 0} students
-                    </span>
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowPromotionModal(false)}
-                    className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
-                  >
-                    Close
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isPromoting}
-                    onClick={handleExecuteCascadePromotion}
-                    className="px-4 py-2 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-xl shadow-md disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <ArrowUpRight className="w-4 h-4" />
-                    <span>{isPromoting ? 'Processing Cascade...' : 'Execute Annual Cascade Promotion'}</span>
-                  </button>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1521,6 +1578,58 @@ export const StudentManagement: React.FC = () => {
                 className="px-4 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm disabled:opacity-50"
               >
                 {isDeleting ? 'Deleting...' : 'Yes, Delete Record'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-app Clear All Students Confirmation Modal */}
+      {showClearConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-sm w-full p-5 text-center animate-in fade-in-50">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-900 mb-1">Clear Student Database?</h3>
+            <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+              This will remove all uploaded and entered student records from the database, allowing you to enter or import and test from scratch.
+            </p>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                disabled={isClearingStudents}
+                onClick={() => setShowClearConfirmModal(false)}
+                className="px-3.5 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isClearingStudents}
+                onClick={async () => {
+                  setIsClearingStudents(true);
+                  try {
+                    const res = await authFetch('/api/students/clear-all', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ departmentId: deptId }),
+                    });
+                    if (res.ok) {
+                      await fetchStudents();
+                      await fetchDeptStats();
+                      setShowClearConfirmModal(false);
+                    }
+                  } catch (err) {
+                    console.error(err);
+                  } finally {
+                    setIsClearingStudents(false);
+                  }
+                }}
+                className="px-4 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isClearingStudents ? 'Clearing Records...' : 'Yes, Clear All Students'}</span>
               </button>
             </div>
           </div>

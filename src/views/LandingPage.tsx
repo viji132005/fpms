@@ -656,7 +656,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSignInClick }) => {
       <footer className="bg-slate-950 text-slate-400 py-8 text-xs border-t border-slate-900 text-center">
         <p className="font-semibold text-slate-300">Maharaja Institute of Technology, Mysore</p>
         <p className="mt-1 text-[11px] text-slate-500">
-          Belagola, Srirangapatna Taluk, Mandya Dist, Karnataka - 571477 · FPMS Institutional System
+          Belawadi, Srirangapatna Taluk, Mandya Dist, Karnataka - 571477 · FPMS Institutional System
         </p>
       </footer>
     </div>

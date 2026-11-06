@@ -53,6 +53,13 @@ export function calculateYearFromSemester(sem: number): number {
   return 4;
 }
 
+export function formatOrdinal(n: number): string {
+  if (n === 1) return '1st';
+  if (n === 2) return '2nd';
+  if (n === 3) return '3rd';
+  return `${n}th`;
+}
+
 export type SemesterCycle = 'ODD' | 'EVEN';
 
 /**
@@ -155,9 +162,9 @@ export function generateSemesterProgressionPreview(
     if (sem >= 8) {
       description = `8th Sem (4th Year) Active Students -> GRADUATED Alumni`;
     } else if (cycle === 'ODD') {
-      description = `${sem}th Sem (${fromYear} Year) -> ${sem + 1}th Sem (${fromYear} Year)`;
+      description = `${formatOrdinal(sem)} Sem (${formatOrdinal(fromYear)} Year) -> ${formatOrdinal(sem + 1)} Sem (${formatOrdinal(fromYear)} Year)`;
     } else {
-      description = `${sem}th Sem (${fromYear} Year) -> ${sem + 1}th Sem (${toYear} Year)`;
+      description = `${formatOrdinal(sem)} Sem (${formatOrdinal(fromYear)} Year) -> ${formatOrdinal(sem + 1)} Sem (${formatOrdinal(toYear)} Year)`;
     }
 
     cohorts.push({
@@ -225,7 +232,21 @@ export function executeSemesterProgression(
   let graduatedCount = 0;
   let heldBackCount = 0;
 
-  const updatedStudents = students.map((s) => {
+  // Determine if any active 4th-year students are graduating in this progression (8th semester)
+  const willGraduateStudents = students.filter(
+    (s) =>
+      s.departmentId === departmentId &&
+      s.status === 'ACTIVE' &&
+      (s.currentSemester ? s.currentSemester >= 8 : s.currentYear === 4)
+  );
+
+  // If new 4th-year students are graduating, purge the older graduated batch from Previous Graduated
+  // so the Previous Graduated cohort is cleanly replaced by the latest graduating batch
+  const filteredBaseStudents = willGraduateStudents.length > 0
+    ? students.filter((s) => !(s.departmentId === departmentId && s.status === 'GRADUATED'))
+    : students;
+
+  const updatedStudents = filteredBaseStudents.map((s) => {
     if (s.departmentId !== departmentId || s.status === 'GRADUATED') {
       return s;
     }
@@ -381,7 +402,12 @@ export function executePromotion(
   const now = new Date().toISOString();
   const historyRecords: PromotionHistoryRecord[] = [];
 
-  const updatedStudents = students.map((s) => {
+  const willGraduate = fromYear >= 4;
+  const filteredStudents = willGraduate
+    ? students.filter((s) => !(s.departmentId === departmentId && s.status === 'GRADUATED'))
+    : students;
+
+  const updatedStudents = filteredStudents.map((s) => {
     if (s.departmentId !== departmentId || s.currentYear !== fromYear) {
       return s;
     }
@@ -476,7 +502,15 @@ export function executeCascadeAnnualPromotion(
   let year1To2Promoted = 0;
   let totalHeldBack = 0;
 
-  const updatedStudents = students.map((s) => {
+  // Purge older graduated batch so Previous Graduated is replaced by the graduating 4th-year cohort
+  const hasYear4Active = students.some(
+    (s) => s.departmentId === departmentId && s.currentYear === 4 && s.status === 'ACTIVE'
+  );
+  const filteredStudents = hasYear4Active
+    ? students.filter((s) => !(s.departmentId === departmentId && s.status === 'GRADUATED'))
+    : students;
+
+  const updatedStudents = filteredStudents.map((s) => {
     if (s.departmentId !== departmentId || s.status === 'GRADUATED') {
       return s;
     }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { authFetch } from '../utils/api.ts';
-import {
+import type {
   Student,
   StudentSectionAllocationRun,
   SectionConfig,
@@ -18,7 +18,7 @@ import {
   exportSectionAllocationWorkbook,
   generateSectionAllocationPdf,
   exportSectionAllocationCsv,
-  ExcelValidationResult,
+  type ExcelValidationResult,
 } from '../utils/sectionAllocationExcel.ts';
 import {
   SplitSquareVertical,
@@ -39,6 +39,8 @@ import {
   Building2,
   BarChart3,
   Calendar,
+  Layers,
+  ArrowLeft,
 } from 'lucide-react';
 
 export const StudentSectionAllocationView: React.FC = () => {
@@ -52,33 +54,42 @@ export const StudentSectionAllocationView: React.FC = () => {
   // Navigation tab: 'wizard' vs 'history'
   const [activeTab, setActiveTab] = useState<'wizard' | 'history'>('wizard');
 
-  // Wizard active step: 1 (Cohort), 2 (Sections), 3 (Method), 4 (Preview & Adjust), 5 (Published)
+  // Wizard active step: 1 (Section Setup), 2 (Allocation Method), 3 (Review & Commit)
   const [currentStep, setCurrentStep] = useState<number>(1);
 
-  // Step 1: Cohort Selection
+  // Year Selection & Cohort Auto-Sync
   const [selectedYear, setSelectedYear] = useState<number>(2); // 1, 2, 3, 4
-  const [selectedSemester, setSelectedSemester] = useState<number>(4); // default sem 4 for 2nd year
-  const [selectedStatus, setSelectedStatus] = useState<string>('ACTIVE');
+  const [selectedSemester, setSelectedSemester] = useState<number>(4);
   const [cohortStudents, setCohortStudents] = useState<Student[]>([]);
   const [isLoadingCohort, setIsLoadingCohort] = useState<boolean>(false);
+  const [deptStudentSemesters, setDeptStudentSemesters] = useState<Record<number, number>>({
+    1: 1,
+    2: 4,
+    3: 6,
+    4: 8,
+  });
 
-  // Step 2: Section Configuration
-  const [numSections, setNumSections] = useState<number>(3); // 2, 3, 4
+  // Section Configuration: 2, 3, 4, or 'CUSTOM'
+  const [numSections, setNumSections] = useState<number>(3); // 2, 3, 4, or custom
+  const [isCustomSections, setIsCustomSections] = useState<boolean>(false);
+  const [customSectionInput, setCustomSectionInput] = useState<number>(5);
   const [sectionConfigs, setSectionConfigs] = useState<SectionConfig[]>([
-    { name: 'Section A', capacity: 60, targetCount: 0 },
-    { name: 'Section B', capacity: 60, targetCount: 0 },
-    { name: 'Section C', capacity: 60, targetCount: 0 },
+    { name: 'Section A', capacity: 999, targetCount: 0 },
+    { name: 'Section B', capacity: 999, targetCount: 0 },
+    { name: 'Section C', capacity: 999, targetCount: 0 },
   ]);
 
-  // Step 3: Allocation Method
-  const [allocationMethod, setAllocationMethod] = useState<'RANDOM' | 'PERFORMANCE'>('PERFORMANCE');
-  const [randomSeed, setRandomSeed] = useState<string>(`seed-${Math.floor(10000 + Math.random() * 90000)}`);
+  // Allocation Method
+  const [allocationMethod, setAllocationMethod] = useState<'RANDOM' | 'PERFORMANCE'>('RANDOM');
 
-  // Method B: Performance Balanced Settings
+  // Method B: Performance Balanced Settings (Separated CGPA vs SGPA)
   const [performanceMetric, setPerformanceMetric] = useState<'CGPA' | 'SGPA'>('CGPA');
   const [sgpaSemester, setSgpaSemester] = useState<number>(3);
-  const [performanceBands] = useState<SectionAllocationBand[]>(DEFAULT_PERFORMANCE_BANDS);
   const [missingScorePolicy, setMissingScorePolicy] = useState<'LOWEST_BAND' | 'DISTRIBUTE_EVENLY' | 'UNASSIGNED'>('LOWEST_BAND');
+
+  // Dynamic Performance Bands (configurable number of parts & ranges)
+  const [bandCount, setBandCount] = useState<number>(4);
+  const [performanceBands, setPerformanceBands] = useState<SectionAllocationBand[]>(DEFAULT_PERFORMANCE_BANDS);
 
   // Excel Upload State
   const [uploadedScores, setUploadedScores] = useState<Record<string, number>>({});
@@ -86,12 +97,12 @@ export const StudentSectionAllocationView: React.FC = () => {
   const [isParsingExcel, setIsParsingExcel] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
 
-  // Step 4: Preview Run & Manual Overrides
+  // Review & Commit State
   const [currentRun, setCurrentRun] = useState<StudentSectionAllocationRun | null>(null);
   const [studentSearch, setStudentSearch] = useState('');
   const [filterSection, setFilterSection] = useState<string>('ALL');
-  const [filterBand, setFilterBand] = useState<string>('ALL');
   const [manualAdjustmentCount, setManualAdjustmentCount] = useState<number>(0);
+  const [committedSuccess, setCommittedSuccess] = useState<boolean>(false);
 
   // Notification banners
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -103,43 +114,75 @@ export const StudentSectionAllocationView: React.FC = () => {
   const [historyRuns, setHistoryRuns] = useState<StudentSectionAllocationRun[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
+  // Fetch active running semesters per year from Student Management
+  const fetchDeptSemesters = async () => {
+    try {
+      const res = await authFetch(`/api/students?departmentId=${encodeURIComponent(deptId)}&status=ACTIVE`);
+      if (res.ok) {
+        const students: Student[] = await res.json();
+        const semMap: Record<number, number> = { 1: 1, 2: 4, 3: 6, 4: 8 };
+        [1, 2, 3, 4].forEach((yr) => {
+          const yrStudents = students.filter((s) => s.currentYear === yr && s.currentSemester);
+          if (yrStudents.length > 0) {
+            const semCounts: Record<number, number> = {};
+            yrStudents.forEach((s) => {
+              const sem = s.currentSemester || (yr * 2 - 1);
+              semCounts[sem] = (semCounts[sem] || 0) + 1;
+            });
+            const top = Object.entries(semCounts).sort((a, b) => b[1] - a[1])[0];
+            semMap[yr] = top ? Number(top[0]) : yr * 2 - 1;
+          } else {
+            semMap[yr] = yr * 2 - 1;
+          }
+        });
+        setDeptStudentSemesters(semMap);
+        setSelectedSemester(semMap[selectedYear] || selectedYear * 2);
+      }
+    } catch (err) {
+      console.warn('Could not sync student semester cycle:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchDeptSemesters();
+  }, [deptId]);
+
   // Auto-sync semester when year changes
   useEffect(() => {
-    if (selectedYear === 1) setSelectedSemester(2);
-    else if (selectedYear === 2) setSelectedSemester(4);
-    else if (selectedYear === 3) setSelectedSemester(6);
-    else if (selectedYear === 4) setSelectedSemester(8);
-  }, [selectedYear]);
+    if (deptStudentSemesters[selectedYear]) {
+      setSelectedSemester(deptStudentSemesters[selectedYear]);
+    } else {
+      setSelectedSemester(selectedYear * 2);
+    }
+  }, [selectedYear, deptStudentSemesters]);
 
   // Sync section count configs
   useEffect(() => {
-    const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+    const count = isCustomSections ? customSectionInput : numSections;
     const totalCount = cohortStudents.length;
-    const base = Math.floor(totalCount / numSections);
-    const remainder = totalCount % numSections;
+    const base = Math.floor(totalCount / count);
+    const remainder = totalCount % count;
 
     const updated: SectionConfig[] = [];
-    for (let i = 0; i < numSections; i++) {
+    for (let i = 0; i < count; i++) {
       const existing = sectionConfigs[i];
       const target = base + (i < remainder ? 1 : 0);
       updated.push({
-        name: existing?.name || `Section ${letters[i]}`,
-        capacity: existing?.capacity || 60,
+        name: existing?.name || `Section ${letters[i] || i + 1}`,
+        capacity: 999, // Capacity restriction removed per requirements
         targetCount: target,
       });
     }
     setSectionConfigs(updated);
-  }, [numSections, cohortStudents.length]);
+  }, [numSections, isCustomSections, customSectionInput, cohortStudents.length]);
 
   // Fetch eligible cohort students
   const fetchCohortStudents = async () => {
     setIsLoadingCohort(true);
     setErrorMessage(null);
     try {
-      let url = `/api/students?departmentId=${encodeURIComponent(deptId)}&year=${selectedYear}&`;
-      if (selectedStatus) {
-        url += `status=${encodeURIComponent(selectedStatus)}&`;
-      }
+      const url = `/api/students?departmentId=${encodeURIComponent(deptId)}&year=${selectedYear}&status=ACTIVE`;
       const res = await authFetch(url);
       if (res.ok) {
         const data: Student[] = await res.json();
@@ -154,7 +197,7 @@ export const StudentSectionAllocationView: React.FC = () => {
 
   useEffect(() => {
     fetchCohortStudents();
-  }, [deptId, selectedYear, selectedStatus]);
+  }, [deptId, selectedYear]);
 
   // Fetch history runs
   const fetchHistory = async () => {
@@ -178,18 +221,40 @@ export const StudentSectionAllocationView: React.FC = () => {
     }
   }, [activeTab, deptId]);
 
-  // Total capacity check
-  const totalCapacity = useMemo(() => {
-    return sectionConfigs.reduce((sum, s) => sum + (Number(s.capacity) || 0), 0);
-  }, [sectionConfigs]);
+  // Update default bands when number of parts changes
+  const handleBandCountChange = (count: number) => {
+    setBandCount(count);
+    if (count === 2) {
+      setPerformanceBands([
+        { id: 'band-1', name: 'High Tier (>= 7.50)', min: 7.5, max: 10.0, inclusiveMin: true, inclusiveMax: true, description: 'Above Average' },
+        { id: 'band-2', name: 'Standard Tier (< 7.50)', min: 0.0, max: 7.5, inclusiveMin: true, inclusiveMax: false, description: 'Foundational' },
+      ]);
+    } else if (count === 3) {
+      setPerformanceBands([
+        { id: 'band-1', name: 'Elite Tier (> 8.50)', min: 8.5, max: 10.0, inclusiveMin: false, inclusiveMax: true, description: 'Top Performers' },
+        { id: 'band-2', name: 'First Class (7.00 - 8.50)', min: 7.0, max: 8.5, inclusiveMin: true, inclusiveMax: true, description: 'Strong Performers' },
+        { id: 'band-3', name: 'Developing Tier (< 7.00)', min: 0.0, max: 7.0, inclusiveMin: true, inclusiveMax: false, description: 'Foundational' },
+      ]);
+    } else if (count === 4) {
+      setPerformanceBands(DEFAULT_PERFORMANCE_BANDS);
+    } else if (count === 5) {
+      setPerformanceBands([
+        { id: 'band-1', name: 'Distinction (> 9.00)', min: 9.0, max: 10.0, inclusiveMin: false, inclusiveMax: true, description: 'Elite' },
+        { id: 'band-2', name: 'High First (8.00 - 9.00)', min: 8.0, max: 9.0, inclusiveMin: true, inclusiveMax: true, description: 'Very Good' },
+        { id: 'band-3', name: 'First Class (7.00 - 8.00)', min: 7.0, max: 8.0, inclusiveMin: true, inclusiveMax: true, description: 'Good' },
+        { id: 'band-4', name: 'Second Class (6.00 - 7.00)', min: 6.0, max: 7.0, inclusiveMin: true, inclusiveMax: true, description: 'Average' },
+        { id: 'band-5', name: 'Pass / Support (< 6.00)', min: 0.0, max: 6.0, inclusiveMin: true, inclusiveMax: false, description: 'Support Needed' },
+      ]);
+    }
+  };
 
-  const capacityShortfall = cohortStudents.length > totalCapacity;
-
-  // Handle section capacity change
-  const handleCapacityChange = (index: number, newCapacity: number) => {
-    const updated = [...sectionConfigs];
-    updated[index].capacity = newCapacity;
-    setSectionConfigs(updated);
+  const handleUpdateBandRange = (index: number, field: 'name' | 'min' | 'max', val: any) => {
+    const updated = [...performanceBands];
+    updated[index] = {
+      ...updated[index],
+      [field]: field === 'name' ? val : Number(val),
+    };
+    setPerformanceBands(updated);
   };
 
   // Generate & Download Excel Entry Template
@@ -221,7 +286,7 @@ export const StudentSectionAllocationView: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Parse Uploaded Excel File
+  // Parse Uploaded Excel File (Key match by student USN)
   const handleUploadExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -242,11 +307,11 @@ export const StudentSectionAllocationView: React.FC = () => {
 
       if (!result.isValid) {
         setErrorMessage(
-          `Uploaded Excel file has validation issues: ${result.errorSummary.join(', ')}. Please review report.`
+          `Uploaded Excel file has validation issues: ${result.errorSummary.join(', ')}. Please check student USNs and score values.`
         );
       } else {
         setSuccessMessage(
-          `Excel scores successfully loaded for ${result.matchedCount} of ${cohortStudents.length} students!`
+          `Excel scores successfully matched by USN for ${result.matchedCount} of ${cohortStudents.length} students!`
         );
       }
     } catch (err: any) {
@@ -256,20 +321,14 @@ export const StudentSectionAllocationView: React.FC = () => {
     }
   };
 
-  // Execute Allocation Preview
+  // Execute Allocation (True Random without hardcoded seeds)
   const handleGenerateAllocation = async () => {
     setErrorMessage(null);
     setSuccessMessage(null);
+    setCommittedSuccess(false);
 
     if (cohortStudents.length === 0) {
-      setErrorMessage('No eligible students available for allocation.');
-      return;
-    }
-
-    if (capacityShortfall) {
-      setErrorMessage(
-        `Insufficient total capacity (${totalCapacity}) for ${cohortStudents.length} students. Please increase section capacities.`
-      );
+      setErrorMessage('No eligible active students available in this cohort.');
       return;
     }
 
@@ -280,6 +339,9 @@ export const StudentSectionAllocationView: React.FC = () => {
         return;
       }
     }
+
+    // Always generate a fresh random seed for truly unbiased randomization
+    const freshRandomSeed = `seed-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
     setIsGenerating(true);
     try {
@@ -295,7 +357,7 @@ export const StudentSectionAllocationView: React.FC = () => {
           performanceMetric: allocationMethod === 'PERFORMANCE' ? performanceMetric : undefined,
           sections: sectionConfigs,
           bands: performanceBands,
-          randomSeed: String(randomSeed),
+          randomSeed: freshRandomSeed,
           performanceScores: uploadedScores,
           missingPolicy: missingScorePolicy,
         }),
@@ -313,12 +375,12 @@ export const StudentSectionAllocationView: React.FC = () => {
         academicYear: currentAcademicYear,
         yearOfStudy: selectedYear,
         semester: selectedSemester,
-        title: `Year ${selectedYear} (Sem ${selectedSemester}) Section Allocation (Draft)`,
+        title: `Year ${selectedYear} (Sem ${selectedSemester}) Section Allocation`,
         status: 'DRAFT',
         method: allocationMethod,
         performanceMetric: allocationMethod === 'PERFORMANCE' ? performanceMetric : null,
         sgpaSemester: allocationMethod === 'PERFORMANCE' && performanceMetric === 'SGPA' ? sgpaSemester : null,
-        randomSeed: String(randomSeed),
+        randomSeed: freshRandomSeed,
         algorithmVersion: data.result.algorithmVersion || '1.0-BALANCED',
         sections: sectionConfigs,
         bands: performanceBands,
@@ -334,8 +396,9 @@ export const StudentSectionAllocationView: React.FC = () => {
 
       setCurrentRun(run);
       setManualAdjustmentCount(0);
-      setCurrentStep(4);
-      setSuccessMessage('Allocation generated successfully! You can now review distribution and manually adjust sections.');
+      setFilterSection('ALL');
+      setCurrentStep(3); // Review step
+      setSuccessMessage('Section allocation generated successfully! Click any section box below to view that section roster.');
     } catch (err: any) {
       setErrorMessage(err.message || 'Error executing allocation.');
     } finally {
@@ -348,20 +411,16 @@ export const StudentSectionAllocationView: React.FC = () => {
     if (!currentRun) return;
 
     const studentIndex = currentRun.students.findIndex((s) => s.usn === studentUsn);
-    if (studentIndex === -1) return;
+    if (studentIndex < 0) return;
 
-    const updatedStudents: AllocatedStudent[] = [...currentRun.students];
-    const previousSection = updatedStudents[studentIndex].assignedSection;
-    if (previousSection === newSection) return;
-
+    const updatedStudents = [...currentRun.students];
     updatedStudents[studentIndex] = {
       ...updatedStudents[studentIndex],
       assignedSection: newSection,
       isManualOverride: true,
-      overrideReason: `Manual reassignment from ${previousSection} to ${newSection}`,
     };
 
-    // Recalculate summary statistics
+    // Recompute distribution stats
     const sectionCounts: Record<string, number> = {};
     const sectionScoreSums: Record<string, number> = {};
     const sectionScoreCounts: Record<string, number> = {};
@@ -405,34 +464,8 @@ export const StudentSectionAllocationView: React.FC = () => {
     setManualAdjustmentCount((prev) => prev + 1);
   };
 
-  // Save Draft
-  const handleSaveDraft = async () => {
-    if (!currentRun) return;
-    setIsSaving(true);
-    setErrorMessage(null);
-    try {
-      const res = await authFetch('/api/section-allocations/save-draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentRun),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setErrorMessage(data.error || 'Failed to save draft.');
-        return;
-      }
-      setSuccessMessage('Section allocation saved as DRAFT successfully.');
-      setCurrentRun(data.run);
-      fetchHistory();
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Error saving draft.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Publish Allocation
-  const handlePublishAllocation = async () => {
+  // Commit Section Allocation for Year
+  const handleCommitAllocation = async () => {
     if (!currentRun) return;
     setIsSaving(true);
     setErrorMessage(null);
@@ -444,18 +477,17 @@ export const StudentSectionAllocationView: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) {
-        setErrorMessage(data.error || 'Failed to publish allocation.');
+        setErrorMessage(data.error || 'Failed to commit allocation.');
         return;
       }
       setSuccessMessage(
-        `Section allocation officially PUBLISHED! Assigned sections have been synchronized across all ${currentRun.totalStudentsCount} student profiles in Student Management.`
+        `Section allocation committed for Year ${selectedYear} (${selectedSemester}th Sem)! You can download the official section roster in Excel and PDF below.`
       );
       setCurrentRun(data.run);
-      setCurrentStep(5);
-      fetchCohortStudents();
+      setCommittedSuccess(true);
       fetchHistory();
     } catch (err: any) {
-      setErrorMessage(err.message || 'Error publishing allocation.');
+      setErrorMessage(err.message || 'Error committing allocation.');
     } finally {
       setIsSaving(false);
     }
@@ -473,7 +505,7 @@ export const StudentSectionAllocationView: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `MIT_Mysore_${deptCode}_Year${run.yearOfStudy}_Section_Allocation_v${run.versionNumber}.xlsx`;
+    link.download = `MIT_Mysore_${deptCode}_Year${run.yearOfStudy}_Section_Allocation.xlsx`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -490,27 +522,10 @@ export const StudentSectionAllocationView: React.FC = () => {
       institution?.institutionName || 'MAHARAJA INSTITUTE OF TECHNOLOGY MYSORE',
       deptName
     );
-    doc.save(`MIT_Mysore_${deptCode}_Year${run.yearOfStudy}_Section_Allocation_v${run.versionNumber}.pdf`);
+    doc.save(`MIT_Mysore_${deptCode}_Year${run.yearOfStudy}_Section_Allocation.pdf`);
   };
 
-  // Export CSV
-  const handleExportCsv = (targetRun?: StudentSectionAllocationRun) => {
-    const run = targetRun || currentRun;
-    if (!run) return;
-
-    const csvContent = exportSectionAllocationCsv(run);
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `MIT_Mysore_${deptCode}_Year${run.yearOfStudy}_Section_Allocation_v${run.versionNumber}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  // Filter students for Step 4 Preview Table
+  // Filter students for Review Table (Clicking Section card filters to that section!)
   const filteredStudents = useMemo(() => {
     if (!currentRun) return [];
     return currentRun.students.filter((s) => {
@@ -518,10 +533,11 @@ export const StudentSectionAllocationView: React.FC = () => {
         s.fullName.toLowerCase().includes(studentSearch.toLowerCase()) ||
         s.usn.toLowerCase().includes(studentSearch.toLowerCase());
       const matchesSection = filterSection === 'ALL' || s.assignedSection === filterSection;
-      const matchesBand = filterBand === 'ALL' || s.bandName === filterBand;
-      return matchesSearch && matchesSection && matchesBand;
+      return matchesSearch && matchesSection;
     });
-  }, [currentRun, studentSearch, filterSection, filterBand]);
+  }, [currentRun, studentSearch, filterSection]);
+
+  const romanNumerals = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
 
   return (
     <div className="space-y-6">
@@ -529,962 +545,769 @@ export const StudentSectionAllocationView: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-[#7B1113] text-white flex items-center justify-center shadow-sm">
-              <SplitSquareVertical className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                <span>Intelligent Student Section Allocation</span>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-[#7B1113] border border-rose-200">
-                  {deptCode}
-                </span>
-              </h1>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Stratified performance balancing, random balanced distribution, and official multi-section roster exports.
-              </p>
-            </div>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+              Student Section Allocation & Division
+            </h1>
+            <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-50 text-[#7B1113] border border-rose-200">
+              Dept: {deptCode}
+            </span>
           </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Divide students of an academic cohort into balanced sections (Random or Performance-balanced) and export official student section rosters.
+          </p>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl self-start sm:self-center border border-slate-200">
+        {/* Tab switch: New Allocation Wizard vs History */}
+        <div className="flex items-center gap-2 self-start">
           <button
-            type="button"
-            onClick={() => setActiveTab('wizard')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+            onClick={() => {
+              setActiveTab('wizard');
+              setCommittedSuccess(false);
+            }}
+            className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'wizard'
-                ? 'bg-white text-slate-900 shadow-sm font-bold'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-[#7B1113] text-white shadow-sm'
+                : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5 text-[#7B1113]" />
+            <SplitSquareVertical className="w-4 h-4" />
             <span>Allocation Wizard</span>
           </button>
           <button
-            type="button"
             onClick={() => setActiveTab('history')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'history'
-                ? 'bg-white text-slate-900 shadow-sm font-bold'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-[#7B1113] text-white shadow-sm'
+                : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
             }`}
           >
-            <History className="w-3.5 h-3.5 text-blue-600" />
-            <span>History & Audit Trail</span>
+            <History className="w-4 h-4" />
+            <span>Committed Records ({historyRuns.length})</span>
           </button>
         </div>
       </div>
 
-      {/* Messages */}
+      {/* Notifications */}
       {errorMessage && (
-        <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between shadow-sm">
+        <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800 flex items-center justify-between shadow-sm animate-in fade-in-50">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
             <span>{errorMessage}</span>
           </div>
-          <button
-            onClick={() => setErrorMessage(null)}
-            className="text-rose-500 hover:text-rose-700 text-sm font-bold px-1"
-          >
-            ×
+          <button onClick={() => setErrorMessage(null)} className="text-rose-400 hover:text-rose-700 text-sm font-bold cursor-pointer">
+            &times;
           </button>
         </div>
       )}
 
       {successMessage && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between shadow-sm">
+        <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-semibold text-emerald-800 flex items-center justify-between shadow-sm animate-in fade-in-50">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{successMessage}</span>
           </div>
-          <button
-            onClick={() => setSuccessMessage(null)}
-            className="text-emerald-500 hover:text-emerald-700 text-sm font-bold px-1"
-          >
-            ×
+          <button onClick={() => setSuccessMessage(null)} className="text-emerald-400 hover:text-emerald-700 text-sm font-bold cursor-pointer">
+            &times;
           </button>
         </div>
       )}
 
-      {/* TAB A: ALLOCATION WIZARD */}
+      {/* TAB 1: ALLOCATION WIZARD */}
       {activeTab === 'wizard' && (
         <div className="space-y-6">
-          {/* Progress Indicator */}
-          <div className="grid grid-cols-4 gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
+          {/* Step Indicator Header (3 Simple Steps) */}
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between text-xs font-bold">
             {[
-              { num: 1, label: '1. Cohort Selection' },
-              { num: 2, label: '2. Section Setup' },
-              { num: 3, label: '3. Allocation Method' },
-              { num: 4, label: '4. Review & Publish' },
-            ].map((step) => (
+              { num: 1, label: '1. Year & Section Setup' },
+              { num: 2, label: '2. Allocation Method' },
+              { num: 3, label: '3. Review & Commit' },
+            ].map((st) => (
               <div
-                key={step.num}
+                key={st.num}
                 onClick={() => {
-                  if (step.num <= currentStep || (step.num === 4 && currentRun)) {
-                    setCurrentStep(step.num);
+                  if (st.num < currentStep || (st.num === 2 && currentRun)) {
+                    setCurrentStep(st.num);
                   }
                 }}
-                className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                  currentStep === step.num
-                    ? 'bg-white text-[#7B1113] shadow-sm font-bold border border-rose-200'
-                    : currentStep > step.num
-                    ? 'text-emerald-700 bg-emerald-50/50 cursor-pointer'
-                    : 'text-slate-400 cursor-not-allowed'
+                className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl transition-all ${
+                  currentStep === st.num
+                    ? 'bg-[#7B1113] text-white shadow-sm'
+                    : currentStep > st.num
+                    ? 'text-emerald-700 bg-emerald-50 cursor-pointer hover:bg-emerald-100'
+                    : 'text-slate-400 bg-slate-50'
                 }`}
               >
-                {currentStep > step.num ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-600" />
-                ) : (
-                  <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-700 text-[10px] flex items-center justify-center">
-                    {step.num}
-                  </span>
-                )}
-                <span className="hidden sm:inline">{step.label}</span>
+                <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold border border-current">
+                  {currentStep > st.num ? '✓' : st.num}
+                </span>
+                <span>{st.label}</span>
               </div>
             ))}
           </div>
 
-          {/* STEP 1: COHORT SELECTION */}
+          {/* ============================================================== */}
+          {/* STEP 1: YEAR SELECTION & SECTION SETUP */}
+          {/* ============================================================== */}
           {currentStep === 1 && (
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-                <div>
-                  <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <Users className="w-4 h-4 text-[#7B1113]" />
-                    <span>Step 1: Select Student Cohort for Section Allocation</span>
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Data dynamically synced with Student Management (single source of truth). No re-typing required.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-500">Academic Year:</span>
-                  <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-md bg-slate-100 text-slate-800 border border-slate-200">
-                    {currentAcademicYear}
-                  </span>
-                </div>
-              </div>
-
-              {/* Filters */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Department</label>
-                  <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800">
-                    <Building2 className="w-4 h-4 text-[#7B1113]" />
-                    <span className="truncate">{deptName}</span>
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in-50">
+              {/* Year Selection & Automatic Semester Display */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-[#7B1113]" />
+                    <span>Select Academic Cohort / Year:</span>
+                  </label>
+                  <div className="flex items-center gap-2 px-3 py-1 bg-rose-50 text-[#7B1113] border border-rose-200 rounded-lg text-xs font-bold">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>
+                      Active Running Term: {selectedSemester}th Semester ({romanNumerals[selectedSemester]} Sem)
+                    </span>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Year of Study</label>
-                  <div className="grid grid-cols-4 gap-1">
-                    {[1, 2, 3, 4].map((yr) => (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+                  {[1, 2, 3, 4].map((yr) => {
+                    const isSelected = selectedYear === yr;
+                    const sem = deptStudentSemesters[yr] || yr * 2;
+                    return (
                       <button
                         key={yr}
-                        type="button"
-                        onClick={() => setSelectedYear(yr)}
-                        className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
-                          selectedYear === yr
-                            ? 'bg-[#7B1113] border-[#7B1113] text-white shadow-sm'
+                        onClick={() => {
+                          setSelectedYear(yr);
+                          setSelectedSemester(sem);
+                        }}
+                        className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#7B1113]/5 border-[#7B1113] text-[#7B1113] ring-1 ring-[#7B1113] shadow-sm'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-sm">
+                            {yr === 1 ? '1st' : yr === 2 ? '2nd' : yr === 3 ? '3rd' : '4th'} Year
+                          </span>
+                          <div
+                            className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                              isSelected
+                                ? 'bg-[#7B1113] border-[#7B1113] text-white'
+                                : 'border-slate-300 bg-white'
+                            }`}
+                          >
+                            {isSelected && <Check className="w-3 h-3" />}
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-medium">
+                          Running: Sem {sem} ({romanNumerals[sem]} Sem)
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Cohort Student Count Summary */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center font-bold text-slate-800 shadow-xs">
+                    <Users className="w-5 h-5 text-[#7B1113]" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-900 text-sm">
+                      {isLoadingCohort ? 'Counting active cohort students...' : `${cohortStudents.length} Students Registered`}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Department of {deptName} · Year {selectedYear} ({selectedSemester}th Semester)
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <span className="font-mono font-bold text-[#7B1113] text-sm">
+                    {sectionConfigs.length} Sections Configured
+                  </span>
+                  <div className="text-[11px] text-slate-400">
+                    ~{Math.round(cohortStudents.length / sectionConfigs.length)} students per section
+                  </div>
+                </div>
+              </div>
+
+              {/* Number of Sections Setup (2, 3, 4, or Custom) */}
+              <div className="space-y-4 pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-[#7B1113]" />
+                    <span>Number of Sections to Divide Into:</span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[2, 3, 4].map((count) => {
+                    const isSelected = !isCustomSections && numSections === count;
+                    return (
+                      <button
+                        key={count}
+                        onClick={() => {
+                          setIsCustomSections(false);
+                          setNumSections(count);
+                        }}
+                        className={`p-3.5 rounded-xl border text-center transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#7B1113] text-white border-[#7B1113] font-bold shadow-sm'
                             : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                         }`}
                       >
-                        Yr {yr}
+                        <div className="text-sm font-bold">{count} Sections</div>
+                        <div className={`text-[10px] mt-0.5 ${isSelected ? 'text-rose-100' : 'text-slate-400'}`}>
+                          ({Array.from({ length: count }, (_, i) => String.fromCharCode(65 + i)).join(', ')})
+                        </div>
                       </button>
-                    ))}
-                  </div>
-                </div>
+                    );
+                  })}
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Running Semester</label>
-                  <select
-                    value={selectedSemester}
-                    onChange={(e) => setSelectedSemester(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs font-semibold bg-white border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                  {/* Custom Sections Option */}
+                  <button
+                    onClick={() => setIsCustomSections(true)}
+                    className={`p-3.5 rounded-xl border text-center transition-all cursor-pointer ${
+                      isCustomSections
+                        ? 'bg-[#7B1113] text-white border-[#7B1113] font-bold shadow-sm'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
                   >
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((sem) => (
-                      <option key={sem} value={sem}>
-                        Semester {sem} (Year {Math.ceil(sem / 2)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Student Status</label>
-                  <select
-                    value={selectedStatus}
-                    onChange={(e) => setSelectedStatus(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-semibold bg-white border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  >
-                    <option value="ACTIVE">Active Students Only (Recommended)</option>
-                    <option value="">All Statuses</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Cohort Summary Box */}
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center font-bold text-lg font-mono text-[#7B1113]">
-                    {cohortStudents.length}
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-slate-900">
-                      Eligible Students for Year {selectedYear} (Semester {selectedSemester})
+                    <div className="text-sm font-bold">Custom Sections</div>
+                    <div className={`text-[10px] mt-0.5 ${isCustomSections ? 'text-rose-100' : 'text-slate-400'}`}>
+                      (Specify Number)
                     </div>
-                    <div className="text-[11px] text-slate-500">
-                      {cohortStudents.length > 0
-                        ? `Ready to divide into academic sections. Single source of truth: Student Management.`
-                        : `No active students found in this cohort. Please check Student Management.`}
+                  </button>
+                </div>
+
+                {/* Custom Sections Number Input */}
+                {isCustomSections && (
+                  <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-950">Enter Custom Number of Sections:</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={customSectionInput}
+                        onChange={(e) => {
+                          const val = Math.max(1, Math.min(10, Number(e.target.value) || 1));
+                          setCustomSectionInput(val);
+                        }}
+                        className="w-20 px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-center font-bold text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#7B1113]"
+                      />
                     </div>
+                    <p className="text-[11px] text-amber-800">
+                      Sections will be automatically labeled from Section A to Section {String.fromCharCode(64 + customSectionInput)}.
+                    </p>
                   </div>
-                </div>
+                )}
 
-                <button
-                  type="button"
-                  onClick={fetchCohortStudents}
-                  disabled={isLoadingCohort}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-center"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCohort ? 'animate-spin' : ''}`} />
-                  <span>Refresh Cohort</span>
-                </button>
+                {/* Section Allocation Cards Preview */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                  {sectionConfigs.map((sec, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-xs space-y-1.5"
+                    >
+                      <div className="font-bold text-slate-900 text-sm">{sec.name}</div>
+                      <div className="flex items-center justify-between text-xs text-slate-600">
+                        <span>Target Balance:</span>
+                        <span className="font-mono font-bold text-[#7B1113]">{sec.targetCount} Students</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              {/* Student Table Preview */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px] sticky top-0 bg-slate-50">
-                      <th className="py-2 px-3 text-center w-12">#</th>
-                      <th className="py-2 px-4">USN</th>
-                      <th className="py-2 px-4">Student Name</th>
-                      <th className="py-2 px-3 text-center">Sem & Year</th>
-                      <th className="py-2 px-3 text-center">Current Section</th>
-                      <th className="py-2 px-3 text-center">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {cohortStudents.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-8 text-center text-slate-500">
-                          {isLoadingCohort ? 'Loading cohort...' : 'No matching student records found.'}
-                        </td>
-                      </tr>
-                    ) : (
-                      cohortStudents.slice(0, 25).map((st, idx) => (
-                        <tr key={st.id} className="hover:bg-slate-50">
-                          <td className="py-1.5 px-3 text-center font-mono text-slate-400">{idx + 1}</td>
-                          <td className="py-1.5 px-4 font-mono font-bold text-[#7B1113]">{st.usn}</td>
-                          <td className="py-1.5 px-4 font-medium text-slate-800">{st.fullName}</td>
-                          <td className="py-1.5 px-3 text-center text-slate-600">
-                            Sem {st.currentSemester} (Yr {st.currentYear})
-                          </td>
-                          <td className="py-1.5 px-3 text-center font-bold text-slate-700">
-                            {st.section || 'Unassigned'}
-                          </td>
-                          <td className="py-1.5 px-3 text-center">
-                            <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
-                              {st.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              {cohortStudents.length > 25 && (
-                <div className="text-[11px] text-slate-500 text-center">
-                  Showing first 25 of {cohortStudents.length} students in this cohort.
-                </div>
-              )}
-
-              {/* Step 1 Footer Action */}
+              {/* Next Button */}
               <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
                 <button
                   type="button"
                   disabled={cohortStudents.length === 0}
                   onClick={() => setCurrentStep(2)}
-                  className="px-5 py-2 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-xl shadow-md flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
                 >
-                  <span>Continue to Section Setup</span>
+                  <span>Proceed to Allocation Method</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
           )}
 
-          {/* STEP 2: SECTION SETUP */}
+          {/* ============================================================== */}
+          {/* STEP 2: ALLOCATION METHOD */}
+          {/* ============================================================== */}
           {currentStep === 2 && (
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in-50">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                 <div>
                   <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <SplitSquareVertical className="w-4 h-4 text-[#7B1113]" />
-                    <span>Step 2: Configure Academic Sections & Capacities</span>
+                    <Sparkles className="w-4 h-4 text-[#7B1113]" />
+                    <span>Select Allocation Algorithm & Methodology</span>
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Define number of sections, individual classroom capacities, and verify balanced distribution.
+                    Year {selectedYear} ({selectedSemester}th Semester) · {cohortStudents.length} Students across {sectionConfigs.length} Sections
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-semibold text-slate-500">Cohort Size:</span>
-                  <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-md bg-rose-50 text-[#7B1113] border border-rose-200">
-                    {cohortStudents.length} Students
-                  </span>
-                </div>
+
+                <button
+                  onClick={() => setCurrentStep(1)}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back to Setup</span>
+                </button>
               </div>
 
-              {/* Number of sections selector */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-2">Number of Sections to Allocate</label>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-w-lg">
-                  {[2, 3, 4, 5, 6].map((k) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setNumSections(k)}
-                      className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
-                        numSections === k
-                          ? 'bg-[#7B1113] border-[#7B1113] text-white shadow-sm'
-                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span>{k} Sections</span>
-                      <span className="text-[10px] font-normal opacity-80">
-                        (~{Math.ceil(cohortStudents.length / k)}/sec)
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Section configuration list */}
-              <div className="space-y-3">
-                <div className="text-xs font-bold text-slate-700">Configured Section Details & Capacities:</div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {sectionConfigs.map((sec, idx) => {
-                    return (
+              {/* Method Selection Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Method A: Random Allocation */}
+                <div
+                  onClick={() => setAllocationMethod('RANDOM')}
+                  className={`p-5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
+                    allocationMethod === 'RANDOM'
+                      ? 'bg-[#7B1113]/5 border-[#7B1113] ring-2 ring-[#7B1113] shadow-sm'
+                      : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm text-slate-900">Option 1: Random Allocation</span>
                       <div
-                        key={idx}
-                        className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3 flex flex-col justify-between"
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                          allocationMethod === 'RANDOM'
+                            ? 'bg-[#7B1113] border-[#7B1113] text-white'
+                            : 'border-slate-300 bg-white'
+                        }`}
                       >
-                        <div>
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-slate-900 text-sm">{sec.name}</span>
-                            <span className="text-[11px] font-semibold text-[#7B1113] bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
-                              Target: {sec.targetCount} Students
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-500 mt-1">
-                            Balanced target for this section based on {cohortStudents.length} total students.
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                            Classroom Max Capacity
-                          </label>
-                          <input
-                            type="number"
-                            min={1}
-                            value={sec.capacity}
-                            onChange={(e) => handleCapacityChange(idx, Number(e.target.value))}
-                            className="w-full px-3 py-1.5 text-xs font-bold bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                          />
-                        </div>
+                        {allocationMethod === 'RANDOM' && <Check className="w-3 h-3" />}
                       </div>
-                    );
-                  })}
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Truly random, unbiased shuffle. Every execution generates a fresh allotment with no hardcoded or repeated seeds.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-100/80 text-[11px] text-slate-500 font-medium">
+                    ✓ Immediate division · No score spreadsheet required
+                  </div>
                 </div>
-              </div>
 
-              {/* Capacity check banner */}
-              <div
-                className={`p-4 rounded-xl border text-xs flex items-center justify-between ${
-                  capacityShortfall
-                    ? 'bg-rose-50 border-rose-200 text-rose-800'
-                    : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  {capacityShortfall ? (
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  ) : (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  )}
-                  <div>
-                    <span className="font-bold">Total Configured Capacity: </span>
-                    <span className="font-mono font-bold">{totalCapacity} seats</span> across {numSections} sections.
-                    {capacityShortfall ? (
-                      <span className="ml-1 text-rose-700">
-                        Deficit of {cohortStudents.length - totalCapacity} seats! Please increase section capacities.
-                      </span>
-                    ) : (
-                      <span className="ml-1 text-emerald-700">
-                        Sufficient capacity for all {cohortStudents.length} eligible students (
-                        {totalCapacity - cohortStudents.length} surplus seats available).
-                      </span>
-                    )}
+                {/* Method B: Performance Balanced Allocation */}
+                <div
+                  onClick={() => setAllocationMethod('PERFORMANCE')}
+                  className={`p-5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
+                    allocationMethod === 'PERFORMANCE'
+                      ? 'bg-[#7B1113]/5 border-[#7B1113] ring-2 ring-[#7B1113] shadow-sm'
+                      : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm text-slate-900">Option 2: Performance Balanced Allocation</span>
+                      <div
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                          allocationMethod === 'PERFORMANCE'
+                            ? 'bg-[#7B1113] border-[#7B1113] text-white'
+                            : 'border-slate-300 bg-white'
+                        }`}
+                      >
+                        {allocationMethod === 'PERFORMANCE' && <Check className="w-3 h-3" />}
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Stratifies students by CGPA or SGPA across tiers so every section receives equal proportions of top, middle, and developing performers.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-100/80 text-[11px] text-[#7B1113] font-semibold">
+                    ✓ Academic parity · Customizable score ranges
                   </div>
                 </div>
               </div>
 
-              {/* Step 2 Footer Actions */}
+              {/* Sub-settings for Performance Balanced Allocation */}
+              {allocationMethod === 'PERFORMANCE' && (
+                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-6">
+                  {/* Metric Choice: Separate CGPA vs SGPA */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
+                      Select Performance Metric (0.0 to 10.0 scale):
+                    </label>
+                    <div className="grid grid-cols-2 gap-3 max-w-md">
+                      <button
+                        type="button"
+                        onClick={() => setPerformanceMetric('CGPA')}
+                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                          performanceMetric === 'CGPA'
+                            ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-sm'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        CGPA (Cumulative)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPerformanceMetric('SGPA')}
+                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                          performanceMetric === 'SGPA'
+                            ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-sm'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        SGPA (Semester Grade)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Configurable Number of Tiers / Parts */}
+                  <div className="space-y-3 pt-3 border-t border-slate-200">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                        Configure Performance Tiers / Parts:
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-500 font-medium">Number of Parts:</span>
+                        {[2, 3, 4, 5].map((cnt) => (
+                          <button
+                            key={cnt}
+                            type="button"
+                            onClick={() => handleBandCountChange(cnt)}
+                            className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              bandCount === cnt
+                                ? 'bg-[#7B1113] text-white shadow-xs'
+                                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {cnt}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Editable Tier Ranges */}
+                    <div className="space-y-2">
+                      {performanceBands.map((band, idx) => (
+                        <div
+                          key={band.id}
+                          className="p-3 bg-white rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[10px]">
+                              {idx + 1}
+                            </span>
+                            <input
+                              type="text"
+                              value={band.name}
+                              onChange={(e) => handleUpdateBandRange(idx, 'name', e.target.value)}
+                              className="font-bold text-slate-800 border-b border-slate-200 focus:outline-none focus:border-[#7B1113]"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2 font-mono">
+                            <span className="text-slate-400">Min:</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="10"
+                              value={band.min}
+                              onChange={(e) => handleUpdateBandRange(idx, 'min', e.target.value)}
+                              className="w-16 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-center font-bold"
+                            />
+                            <span className="text-slate-400">to Max:</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="10"
+                              value={band.max}
+                              onChange={(e) => handleUpdateBandRange(idx, 'max', e.target.value)}
+                              className="w-16 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-center font-bold"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Excel Upload with USN Key Matching */}
+                  <div className="space-y-3 pt-3 border-t border-slate-200">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
+                          Upload Student {performanceMetric} Excel / CSV File:
+                        </label>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Matches student USN automatically from any column structure (Name, Email, USN, {performanceMetric}).
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleDownloadTemplate}
+                        className="px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download Pre-filled Template</span>
+                      </button>
+                    </div>
+
+                    <div className="p-4 bg-white rounded-xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <Upload className="w-5 h-5 text-[#7B1113]" />
+                        <div>
+                          <div className="text-xs font-bold text-slate-800">
+                            {uploadedFileName ? uploadedFileName : `Select Excel (.xlsx) containing USN & ${performanceMetric}`}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {excelValidationReport
+                              ? `Matched ${excelValidationReport.matchedCount} of ${cohortStudents.length} students`
+                              : 'Accepts files with extra columns (e.g. email, phone); USN is used as match key'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <label className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-xl cursor-pointer transition-colors shrink-0">
+                        <span>{isParsingExcel ? 'Parsing...' : 'Upload Excel'}</span>
+                        <input
+                          type="file"
+                          accept=".xlsx, .xls, .csv"
+                          onChange={handleUploadExcel}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
               <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
                 <button
                   type="button"
                   onClick={() => setCurrentStep(1)}
                   className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
                 >
-                  Back to Cohort Selection
+                  ← Back to Setup
                 </button>
+
                 <button
                   type="button"
-                  disabled={capacityShortfall}
-                  onClick={() => setCurrentStep(3)}
-                  className="px-5 py-2 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <span>Continue to Allocation Method</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: CHOOSE ALLOCATION METHOD */}
-          {currentStep === 3 && (
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-                <div>
-                  <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-[#7B1113]" />
-                    <span>Step 3: Select Allocation Methodology</span>
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Distribute students using equitable academic performance bands or reproducible random balancing.
-                  </p>
-                </div>
-              </div>
-
-              {/* Method Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div
-                  onClick={() => setAllocationMethod('PERFORMANCE')}
-                  className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
-                    allocationMethod === 'PERFORMANCE'
-                      ? 'bg-[#7B1113]/5 border-[#7B1113] text-[#7B1113] ring-1 ring-[#7B1113] shadow-sm'
-                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2 font-bold text-sm">
-                      <BarChart3 className="w-4 h-4 text-[#7B1113]" />
-                      <span>Method B: Academic Performance-Based (CGPA/SGPA)</span>
-                    </div>
-                    <div
-                      className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
-                        allocationMethod === 'PERFORMANCE'
-                          ? 'bg-[#7B1113] border-[#7B1113] text-white'
-                          : 'border-slate-300 bg-white'
-                      }`}
-                    >
-                      {allocationMethod === 'PERFORMANCE' && '✓'}
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Stratifies students into VTU merit tiers (&gt;8.5, 7.0–8.5, 6.0–7.0, &lt;6.0) and balances top, mid, and pass performers equally across all sections.
-                  </p>
-                </div>
-
-                <div
-                  onClick={() => setAllocationMethod('RANDOM')}
-                  className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
-                    allocationMethod === 'RANDOM'
-                      ? 'bg-[#7B1113]/5 border-[#7B1113] text-[#7B1113] ring-1 ring-[#7B1113] shadow-sm'
-                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2 font-bold text-sm">
-                      <RefreshCw className="w-4 h-4 text-blue-600" />
-                      <span>Method A: Random Balanced Allocation</span>
-                    </div>
-                    <div
-                      className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
-                        allocationMethod === 'RANDOM'
-                          ? 'bg-[#7B1113] border-[#7B1113] text-white'
-                          : 'border-slate-300 bg-white'
-                      }`}
-                    >
-                      {allocationMethod === 'RANDOM' && '✓'}
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Evenly distributes students across sections at random using a reproducible mathematical seed, maintaining strictly equal section sizes.
-                  </p>
-                </div>
-              </div>
-
-              {/* METHOD A CONFIG: Random Seed */}
-              {allocationMethod === 'RANDOM' && (
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-xs font-bold text-slate-900">Reproducible Random Seed:</div>
-                      <div className="text-[11px] text-slate-500">
-                        The same seed generates the exact same student assignment every time for audit verification.
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={randomSeed}
-                        onChange={(e) => setRandomSeed(e.target.value)}
-                        className="w-36 px-3 py-1.5 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg text-slate-800"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setRandomSeed(`seed-${Math.floor(10000 + Math.random() * 90000)}`)}
-                        className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg flex items-center gap-1 cursor-pointer"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        <span>Re-roll Seed</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* METHOD B CONFIG: Excel Template, Upload & Bands */}
-              {allocationMethod === 'PERFORMANCE' && (
-                <div className="space-y-4">
-                  {/* Metric Choice */}
-                  <div className="flex items-center gap-4 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
-                    <span className="font-bold text-slate-700">Metric Basis:</span>
-                    <label className="flex items-center gap-1.5 cursor-pointer font-semibold">
-                      <input
-                        type="radio"
-                        name="metricChoice"
-                        checked={performanceMetric === 'CGPA'}
-                        onChange={() => setPerformanceMetric('CGPA')}
-                        className="text-[#7B1113] focus:ring-[#7B1113]"
-                      />
-                      <span>Cumulative GPA (CGPA)</span>
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer font-semibold">
-                      <input
-                        type="radio"
-                        name="metricChoice"
-                        checked={performanceMetric === 'SGPA'}
-                        onChange={() => setPerformanceMetric('SGPA')}
-                        className="text-[#7B1113] focus:ring-[#7B1113]"
-                      />
-                      <span>Semester GPA (SGPA)</span>
-                    </label>
-
-                    {performanceMetric === 'SGPA' && (
-                      <div className="flex items-center gap-1.5 ml-4">
-                        <span className="text-slate-500 font-medium">Semester:</span>
-                        <select
-                          value={sgpaSemester}
-                          onChange={(e) => setSgpaSemester(Number(e.target.value))}
-                          className="px-2 py-1 text-xs bg-white border border-slate-300 rounded font-bold"
-                        >
-                          {[1, 2, 3, 4, 5, 6, 7].map((s) => (
-                            <option key={s} value={s}>
-                              Sem {s}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Excel Template & Upload Action Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* B1: Download Pre-filled Template */}
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
-                          <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                          <span>1. Download Pre-filled Template (.xlsx)</span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                          Download an Excel file populated with the exact USNs and names of all {cohortStudents.length} students in this cohort.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleDownloadTemplate}
-                        className="px-3.5 py-2 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer self-start"
-                      >
-                        <Download className="w-3.5 h-3.5 text-emerald-700" />
-                        <span>Download {performanceMetric} Template</span>
-                      </button>
-                    </div>
-
-                    {/* B2: Upload Completed Excel */}
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
-                          <Upload className="w-4 h-4 text-[#7B1113]" />
-                          <span>2. Upload Completed Performance Excel</span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                          Upload the sheet with entered marks. The system verifies 0.00–10.00 score boundaries, duplicates, and matches.
-                        </p>
-                      </div>
-                      <div className="space-y-1.5">
-                        <input
-                          type="file"
-                          accept=".xlsx, .xls"
-                          onChange={handleUploadExcel}
-                          disabled={isParsingExcel}
-                          className="w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-[#7B1113] file:text-white hover:file:bg-[#600d0f] cursor-pointer"
-                        />
-                        {uploadedFileName && (
-                          <div className="text-[10px] text-slate-500 font-mono">
-                            Selected: {uploadedFileName} ({Object.keys(uploadedScores).length} scores parsed)
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Validation Report Card */}
-                  {excelValidationReport && (
-                    <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
-                      <div className="font-bold flex items-center justify-between">
-                        <span className="flex items-center gap-1.5 text-slate-800">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                          <span>Excel Validation Summary:</span>
-                        </span>
-                        <span className="font-mono text-[11px] text-slate-500">
-                          {excelValidationReport.matchedCount} of {cohortStudents.length} cohort students mapped
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
-                        <div className="p-2 bg-slate-50 rounded border border-slate-100">
-                          <div className="text-slate-500">Expected Cohort</div>
-                          <div className="font-bold text-slate-800">{excelValidationReport.totalExpected}</div>
-                        </div>
-                        <div className="p-2 bg-emerald-50 rounded border border-emerald-100">
-                          <div className="text-emerald-700">Matched Scores</div>
-                          <div className="font-bold text-emerald-900">{excelValidationReport.validScoresCount}</div>
-                        </div>
-                        <div className="p-2 bg-amber-50 rounded border border-amber-100">
-                          <div className="text-amber-700">Missing Scores</div>
-                          <div className="font-bold text-amber-900">{excelValidationReport.missingScoresCount}</div>
-                        </div>
-                        <div className="p-2 bg-rose-50 rounded border border-rose-100">
-                          <div className="text-rose-700">Invalid / Errors</div>
-                          <div className="font-bold text-rose-900">{excelValidationReport.invalidScores.length}</div>
-                        </div>
-                      </div>
-
-                      {excelValidationReport.missingScoresCount > 0 && (
-                        <div className="p-2.5 bg-amber-50 text-amber-900 rounded-lg border border-amber-200 text-[11px] mt-2 flex items-center justify-between gap-3">
-                          <div>
-                            Notice: {excelValidationReport.missingScoresCount} student(s) have no score recorded in Excel.
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <span className="font-bold">Missing Score Policy:</span>
-                            <select
-                              value={missingScorePolicy}
-                              onChange={(e: any) => setMissingScorePolicy(e.target.value)}
-                              className="px-2 py-1 text-xs bg-white border border-amber-300 rounded font-semibold text-slate-800"
-                            >
-                              <option value="LOWEST_BAND">Assign to Lowest Band</option>
-                              <option value="DISTRIBUTE_EVENLY">Distribute Evenly</option>
-                              <option value="UNASSIGNED">Leave Unassigned</option>
-                            </select>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Performance Bands Table */}
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-800">
-                        Configured VTU Performance Tiers (Stratified Balancing):
-                      </span>
-                      <span className="text-[10px] text-slate-500">Contiguous boundaries strictly validated</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {performanceBands.map((band, idx) => (
-                        <div key={idx} className="p-2.5 bg-white rounded-lg border border-slate-200 text-xs space-y-1">
-                          <div className="font-bold text-[#7B1113]">{band.name}</div>
-                          <div className="text-[11px] font-mono text-slate-600">
-                            {band.min === 0 ? `< ${band.max}` : band.max === 10 ? `> ${band.min}` : `${band.min} – ${band.max}`}
-                          </div>
-                          <div className="text-[10px] text-slate-400 truncate">{band.description}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 3 Footer Actions */}
-              <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => setCurrentStep(2)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
-                >
-                  Back to Section Setup
-                </button>
-                <button
-                  type="button"
-                  disabled={isGenerating}
+                  disabled={isGenerating || cohortStudents.length === 0}
                   onClick={handleGenerateAllocation}
-                  className="px-5 py-2 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-xl shadow-md flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
                 >
                   <Sparkles className="w-4 h-4" />
-                  <span>{isGenerating ? 'Generating Allocation...' : 'Generate Balanced Allocation'}</span>
+                  <span>{isGenerating ? 'Computing Allocation...' : 'Generate Section Allocation'}</span>
                 </button>
               </div>
             </div>
           )}
 
-          {/* STEP 4 & 5: PREVIEW, REVIEW & INTERACTIVE ADJUSTMENTS */}
-          {currentStep >= 4 && currentRun && (
-            <div className="space-y-6">
-              {/* Top Summary Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-1">
-                  <div className="text-xs text-slate-500 font-semibold">Total Students</div>
-                  <div className="text-2xl font-bold text-slate-900 font-mono">{currentRun.totalStudentsCount}</div>
-                  <div className="text-[10px] text-slate-400">Year {currentRun.yearOfStudy} (Sem {currentRun.semester})</div>
-                </div>
-
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-1">
-                  <div className="text-xs text-slate-500 font-semibold">Allocated Sections</div>
-                  <div className="text-2xl font-bold text-[#7B1113] font-mono">{currentRun.sections.length}</div>
-                  <div className="text-[10px] text-slate-400">
-                    {currentRun.sections.map((s) => s.name.replace('Section ', '')).join(', ')}
-                  </div>
-                </div>
-
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-1">
-                  <div className="text-xs text-slate-500 font-semibold">Methodology</div>
-                  <div className="text-xs font-bold text-slate-800 truncate pt-1">
-                    {currentRun.method === 'PERFORMANCE' ? `CGPA / SGPA Stratified` : `Random Balanced`}
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-mono truncate">
-                    {currentRun.method === 'RANDOM' ? `Seed: ${currentRun.randomSeed}` : `${currentRun.performanceMetric || 'CGPA'} Basis`}
-                  </div>
-                </div>
-
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-1">
-                  <div className="text-xs text-slate-500 font-semibold">Status & Overrides</div>
-                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1 pt-1">
-                    <span className={`px-2 py-0.5 rounded text-[10px] ${currentRun.status === 'PUBLISHED' ? 'bg-emerald-100 text-emerald-800 font-bold' : 'bg-amber-100 text-amber-800 font-bold'}`}>
-                      {currentRun.status}
+          {/* ============================================================== */}
+          {/* STEP 3: REVIEW, SECTION ROSTER & COMMIT */}
+          {/* ============================================================== */}
+          {currentStep === 3 && currentRun && (
+            <div className="space-y-6 animate-in fade-in-50">
+              {/* Review Header Banner */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-slate-900">
+                      Year {selectedYear} ({selectedSemester}th Semester) — Section Allocation
+                    </h2>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                      {committedSuccess ? 'COMMITTED' : 'UNCOMMITTED PREVIEW'}
                     </span>
-                    <span className="text-[10px] text-slate-400">v{currentRun.versionNumber}</span>
                   </div>
-                  <div className="text-[10px] text-slate-500">
-                    {manualAdjustmentCount > 0 ? `${manualAdjustmentCount} manual adjustment(s)` : 'Pure algorithmic balance'}
-                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Divided {currentRun.totalStudentsCount} students into {currentRun.sections.length} sections using {currentRun.method === 'RANDOM' ? 'Random Balanced Allocation' : `Performance Balanced (${currentRun.performanceMetric})`}. Click any section card below to view its student roster.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {allocationMethod === 'RANDOM' && !committedSuccess && (
+                    <button
+                      type="button"
+                      disabled={isGenerating}
+                      onClick={handleGenerateAllocation}
+                      className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
+                      <span>Try Another Random Allotment</span>
+                    </button>
+                  )}
+
+                  {!committedSuccess ? (
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={handleCommitAllocation}
+                      className="px-4 py-2 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>{isSaving ? 'Committing...' : `Commit Section Allocation for Year ${selectedYear}`}</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleExportExcel()}
+                        className="px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                        <span>Download Excel (.xlsx)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExportPdf()}
+                        className="px-3.5 py-2 text-xs font-bold text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <FileText className="w-4 h-4 text-rose-600" />
+                        <span>Download PDF (.pdf)</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Section Breakdown Cards */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="font-bold text-xs text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-[#7B1113]" />
-                    <span>Section Distribution & Academic Parity</span>
-                  </div>
-                  <span className="text-xs text-slate-500">
-                    All sections maintained within capacity and performance parity
-                  </span>
+              {/* Section Distribution Cards (Clicking one filters table below to that section!) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-500 font-semibold px-1">
+                  <span>CLICK A SECTION TO FILTER ROSTER:</span>
+                  <button
+                    onClick={() => setFilterSection('ALL')}
+                    className={`text-xs font-bold cursor-pointer ${
+                      filterSection === 'ALL' ? 'text-[#7B1113] underline' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Show All Sections ({currentRun.totalStudentsCount})
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {currentRun.sections.map((sec, idx) => {
-                    const studentCount = currentRun.summary?.sectionCounts?.[sec.name] || 0;
-                    const avgScore = currentRun.summary?.sectionAverages?.[sec.name];
-                    const bandCounts = currentRun.summary?.sectionBandCounts?.[sec.name];
-                    const capacityPercent = Math.min(100, Math.round((studentCount / sec.capacity) * 100));
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {currentRun.sections.map((sec) => {
+                    const isCardSelected = filterSection === sec.name;
+                    const count = currentRun.summary.sectionCounts[sec.name] || 0;
+                    const avg = currentRun.summary.sectionAverages ? currentRun.summary.sectionAverages[sec.name] : null;
 
                     return (
-                      <div key={idx} className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-900 text-sm">{sec.name}</span>
-                          <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800">
-                            {studentCount} Students
+                      <div
+                        key={sec.name}
+                        onClick={() => setFilterSection(sec.name)}
+                        className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
+                          isCardSelected
+                            ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-md ring-2 ring-[#7B1113]'
+                            : 'bg-white border-slate-200 text-slate-800 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-sm">{sec.name}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            isCardSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                          }`}>
+                            {count} std
                           </span>
                         </div>
 
-                        {/* Capacity progress */}
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between text-[10px] text-slate-500">
-                            <span>Capacity Usage:</span>
-                            <span>{studentCount} / {sec.capacity} seats ({capacityPercent}%)</span>
+                        {avg !== null && avg !== undefined && (
+                          <div className={`text-[11px] font-mono mt-1 ${isCardSelected ? 'text-rose-100' : 'text-slate-500'}`}>
+                            Avg {currentRun.performanceMetric}: <strong>{avg}</strong>
                           </div>
-                          <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${capacityPercent > 100 ? 'bg-rose-600' : 'bg-[#7B1113]'}`}
-                              style={{ width: `${Math.min(100, capacityPercent)}%` }}
-                            />
-                          </div>
+                        )}
+
+                        <div className={`text-[10px] mt-2 font-medium ${isCardSelected ? 'text-rose-200' : 'text-slate-400'}`}>
+                          {isCardSelected ? '✓ Currently showing' : 'Click to inspect roster'}
                         </div>
-
-                        {/* Performance metrics if available */}
-                        {avgScore !== undefined && avgScore > 0 && (
-                          <div className="p-2 bg-white rounded-lg border border-slate-200 flex items-center justify-between text-xs">
-                            <span className="text-slate-500">Avg {currentRun.performanceMetric || 'CGPA'}:</span>
-                            <span className="font-mono font-bold text-[#7B1113]">{avgScore.toFixed(2)}</span>
-                          </div>
-                        )}
-
-                        {/* Band count pills */}
-                        {bandCounts && (
-                          <div className="flex items-center gap-1 flex-wrap pt-1">
-                            {Object.entries(bandCounts).map(([bandName, count]) => (
-                              <span
-                                key={bandName}
-                                className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-white text-slate-600 border border-slate-200"
-                              >
-                                {bandName.split(' ')[0]}: {count}
-                              </span>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Full Student Allocation Table with Live Reassignment */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden space-y-3 p-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                      Student Allocation Roster & Section Reassignments
-                    </h3>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Reassign sections on an individual basis. Summary counts and averages recalculate instantly.
-                    </p>
+              {/* Student Roster Table for Selected Section */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden space-y-3 p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800">
+                      Roster: {filterSection === 'ALL' ? 'All Sections' : filterSection}
+                    </span>
+                    <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                      {filteredStudents.length} Students
+                    </span>
                   </div>
 
-                  {/* Filter Toolbar */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                      <input
-                        type="text"
-                        placeholder="Search USN or Name..."
-                        value={studentSearch}
-                        onChange={(e) => setStudentSearch(e.target.value)}
-                        className="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg w-44 focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                      />
-                    </div>
-
-                    <select
-                      value={filterSection}
-                      onChange={(e) => setFilterSection(e.target.value)}
-                      className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg font-semibold text-slate-700"
-                    >
-                      <option value="ALL">All Sections</option>
-                      {currentRun.sections.map((s) => (
-                        <option key={s.name} value={s.name}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-
-                    {currentRun.method === 'PERFORMANCE' && (
-                      <select
-                        value={filterBand}
-                        onChange={(e) => setFilterBand(e.target.value)}
-                        className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg font-semibold text-slate-700"
-                      >
-                        <option value="ALL">All Merit Bands</option>
-                        {performanceBands.map((b) => (
-                          <option key={b.name} value={b.name}>
-                            {b.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search by USN or Name..."
+                      value={studentSearch}
+                      onChange={(e) => setStudentSearch(e.target.value)}
+                      className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg w-full sm:w-64 focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                    />
                   </div>
                 </div>
 
-                {/* Table */}
-                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-96 overflow-y-auto">
+                <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px] sticky top-0 bg-slate-50 z-10">
+                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
                         <th className="py-2.5 px-3 text-center w-12">#</th>
-                        <th className="py-2.5 px-4">USN</th>
-                        <th className="py-2.5 px-4">Student Full Name</th>
-                        <th className="py-2.5 px-3 text-center">Sem & Year</th>
+                        <th className="py-2.5 px-4">USN & Candidate</th>
+                        <th className="py-2.5 px-3 text-center">Assigned Section</th>
                         {currentRun.method === 'PERFORMANCE' && (
                           <>
-                            <th className="py-2.5 px-3 text-center">{currentRun.performanceMetric || 'CGPA'}</th>
-                            <th className="py-2.5 px-3">Performance Band</th>
+                            <th className="py-2.5 px-3 text-center font-mono">{currentRun.performanceMetric}</th>
+                            <th className="py-2.5 px-3">Performance Tier</th>
                           </>
                         )}
-                        <th className="py-2.5 px-4 text-center">Assigned Section (Dropdown Reassign)</th>
+                        <th className="py-2.5 px-3 text-right">Reassign</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filteredStudents.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="py-8 text-center text-slate-500">
-                            No students matching the filter criteria.
+                          <td colSpan={6} className="py-8 text-center text-slate-400">
+                            No students match the search filter.
                           </td>
                         </tr>
                       ) : (
-                        filteredStudents.map((student, idx) => (
-                          <tr key={student.usn} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="py-2 px-3 text-center font-mono text-slate-400">{idx + 1}</td>
-                            <td className="py-2 px-4 font-mono font-bold text-[#7B1113]">{student.usn}</td>
-                            <td className="py-2 px-4">
-                              <div className="font-semibold text-slate-800">{student.fullName}</div>
-                              {student.isManualOverride && (
-                                <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                                  Manually Adjusted
-                                </span>
-                              )}
+                        filteredStudents.map((st, index) => (
+                          <tr key={st.studentId || st.usn} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="py-2.5 px-3 text-center font-mono text-slate-400">
+                              {index + 1}
                             </td>
-                            <td className="py-2 px-3 text-center text-slate-600">
-                              Sem {student.currentSemester} (Yr {student.currentYear})
+                            <td className="py-2.5 px-4">
+                              <div className="font-semibold text-slate-900">{st.fullName}</div>
+                              <div className="text-[11px] font-mono font-bold text-[#7B1113]">{st.usn}</div>
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <span className="inline-flex px-2 py-0.5 rounded font-bold text-xs bg-[#7B1113]/10 text-[#7B1113]">
+                                {st.assignedSection}
+                              </span>
                             </td>
                             {currentRun.method === 'PERFORMANCE' && (
                               <>
-                                <td className="py-2 px-3 text-center font-mono font-bold text-slate-800">
-                                  {student.performanceValue !== null && student.performanceValue !== undefined
-                                    ? student.performanceValue.toFixed(2)
+                                <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-800">
+                                  {st.performanceValue !== null && st.performanceValue !== undefined
+                                    ? st.performanceValue.toFixed(2)
                                     : '—'}
                                 </td>
-                                <td className="py-2 px-3">
-                                  <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
-                                    {student.bandName || 'Unassigned'}
-                                  </span>
+                                <td className="py-2.5 px-3 text-[11px] text-slate-600">
+                                  {st.bandName || 'Unassigned'}
                                 </td>
                               </>
                             )}
-                            <td className="py-2 px-4 text-center">
+                            <td className="py-2.5 px-3 text-right">
                               <select
-                                value={student.assignedSection}
-                                onChange={(e) => handleManualSectionChange(student.usn, e.target.value)}
-                                className="px-2.5 py-1 text-xs font-bold text-slate-800 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113] cursor-pointer"
+                                value={st.assignedSection}
+                                onChange={(e) => handleManualSectionChange(st.usn, e.target.value)}
+                                className="px-2 py-1 bg-white border border-slate-200 rounded text-xs font-semibold text-slate-700 cursor-pointer focus:outline-none focus:border-[#7B1113]"
                               >
-                                {currentRun.sections.map((s) => (
-                                  <option key={s.name} value={s.name}>
-                                    {s.name} ({currentRun.summary?.sectionCounts?.[s.name] || 0}/{s.capacity})
+                                {currentRun.sections.map((sec) => (
+                                  <option key={sec.name} value={sec.name}>
+                                    {sec.name}
                                   </option>
                                 ))}
                               </select>
@@ -1495,168 +1318,73 @@ export const StudentSectionAllocationView: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
-
-                {/* Final Actions Toolbar: Save Draft, Publish, Export */}
-                <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => handleExportExcel()}
-                      className="px-3 py-2 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                      title="Download multi-sheet Excel workbook with summary, section sheets, and master roster"
-                    >
-                      <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                      <span>Export Multi-Sheet Excel</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleExportPdf()}
-                      className="px-3 py-2 text-xs font-semibold text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-xl flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                      title="Download official printable PDF formatted with MIT Mysore seal"
-                    >
-                      <FileText className="w-4 h-4 text-[#7B1113]" />
-                      <span>Export Official PDF</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleExportCsv()}
-                      className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                      title="Download raw CSV file"
-                    >
-                      <Download className="w-4 h-4 text-slate-600" />
-                      <span>Export CSV</span>
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={handleSaveDraft}
-                      className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      Save as Draft
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={handlePublishAllocation}
-                      className="px-5 py-2 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-                    >
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>Publish & Synchronize Roster</span>
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* TAB B: ALLOCATION HISTORY & AUDIT TRAIL */}
+      {/* TAB 2: COMMITTED RECORDS (HISTORY) */}
       {activeTab === 'history' && (
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-100">
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 animate-in fade-in-50">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div>
               <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <History className="w-4 h-4 text-blue-600" />
-                <span>Section Allocation Audit Trail & Past Runs</span>
+                <History className="w-4 h-4 text-[#7B1113]" />
+                <span>Committed Section Allocations for {deptCode}</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Review previous drafts and published allocations, compare distribution variance, and re-download official exports.
+                Saved section allotments for each year and cohort. Download official Excel and PDF rosters for distribution to students.
               </p>
             </div>
-            <button
-              onClick={fetchHistory}
-              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1.5 cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Refresh History</span>
-            </button>
           </div>
 
           {isLoadingHistory ? (
-            <div className="py-12 text-center text-xs text-slate-400">Loading allocation history...</div>
+            <div className="py-12 text-center text-xs text-slate-400">Loading committed records...</div>
           ) : historyRuns.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-500">
-              No previous allocation runs recorded for {deptCode}. Use the Allocation Wizard to create the first section distribution.
+            <div className="py-12 text-center text-slate-500 text-xs">
+              No section allocations have been committed yet for this department. Use the Allocation Wizard to divide cohorts into sections.
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div className="space-y-3">
               {historyRuns.map((run) => (
-                <div key={run.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div
+                  key={run.id}
+                  className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-slate-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-sm text-slate-900">
-                        Year {run.yearOfStudy}{run.semester ? ` (Sem ${run.semester})` : ''}
+                        Year {run.yearOfStudy} · {run.semester ? `${run.semester}th Semester` : ''}
                       </span>
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                          run.status === 'PUBLISHED'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {run.status}
-                      </span>
-                      <span className="font-mono text-xs font-semibold text-slate-500">
-                        v{run.versionNumber}
-                      </span>
-                      <span className="text-[11px] text-slate-500">
-                        · {run.method === 'PERFORMANCE' ? `Performance (${run.performanceMetric || 'CGPA'})` : `Random Balanced`}
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        COMMITTED
                       </span>
                     </div>
-
-                    <div className="text-xs text-slate-500 flex items-center gap-3 pt-0.5">
-                      <span>{run.totalStudentsCount} Students across {run.sections.length} Sections</span>
-                      <span>· Created by {run.createdByName}</span>
-                      <span>· {new Date(run.createdAt).toLocaleString()}</span>
+                    <div className="text-xs text-slate-600">
+                      {run.totalStudentsCount} Students divided into {run.sections.length} Sections ({run.sections.map((s) => s.name).join(', ')})
                     </div>
-
-                    <div className="text-[11px] text-slate-600 flex items-center gap-2 pt-1 flex-wrap">
-                      {run.sections.map((sec) => (
-                        <span key={sec.name} className="font-mono text-[10px] bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                          {sec.name}: {run.summary?.sectionCounts?.[sec.name] || 0}
-                          {run.summary?.sectionAverages?.[sec.name] ? ` (avg ${run.summary.sectionAverages[sec.name].toFixed(2)})` : ''}
-                        </span>
-                      ))}
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      Committed on: {new Date(run.publishedAt || run.createdAt).toLocaleDateString()} by {run.publishedByName || run.createdByName}
                     </div>
                   </div>
 
-                  {/* Actions for History Item */}
-                  <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => handleExportExcel(run)}
-                      className="p-2 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg transition-colors cursor-pointer"
-                      title="Download Excel Workbook"
+                      className="px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-white hover:bg-emerald-50 border border-emerald-300 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
-                      <FileSpreadsheet className="w-4 h-4" />
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Download Excel</span>
                     </button>
-
                     <button
                       type="button"
                       onClick={() => handleExportPdf(run)}
-                      className="p-2 text-[#7B1113] bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-lg transition-colors cursor-pointer"
-                      title="Download Official PDF"
+                      className="px-3 py-1.5 text-xs font-semibold text-rose-800 bg-white hover:bg-rose-50 border border-rose-300 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
-                      <FileText className="w-4 h-4" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCurrentRun(run);
-                        setActiveTab('wizard');
-                        setCurrentStep(4);
-                      }}
-                      className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-                    >
-                      View & Edit
+                      <FileText className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Download PDF</span>
                     </button>
                   </div>
                 </div>

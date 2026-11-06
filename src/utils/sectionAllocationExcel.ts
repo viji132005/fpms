@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import {
+import type {
   StudentSectionAllocationRun,
   AllocatedStudent,
 } from '../types/index.ts';
@@ -170,15 +170,12 @@ export function parsePerformanceExcel(
   if (duplicateUsns.length > 0) {
     errorSummary.push(`Found ${duplicateUsns.length} duplicate USN(s) in uploaded spreadsheet: ${duplicateUsns.slice(0, 5).join(', ')}`);
   }
-  if (unknownUsns.length > 0) {
-    errorSummary.push(`${unknownUsns.length} USN(s) in sheet do not belong to this department/cohort: ${unknownUsns.slice(0, 5).join(', ')}`);
-  }
   if (invalidScores.length > 0) {
     errorSummary.push(`${invalidScores.length} row(s) contain invalid/out-of-range score entries.`);
   }
 
   const isValid =
-    errorSummary.length === 0 &&
+    invalidScores.length === 0 &&
     matchedUsns.size > 0;
 
   return {
@@ -352,7 +349,7 @@ export function generateSectionAllocationPdf(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139);
-  doc.text('Belagola, Srirangapatna Taluk, Mandya - 571 477 · Affiliated to VTU, Belagavi', pageWidth / 2, y, { align: 'center' });
+  doc.text('Belawadi, Srirangapatna Taluk, Mandya - 571 477 · Affiliated to VTU, Belagavi', pageWidth / 2, y, { align: 'center' });
 
   y += 4;
   doc.setDrawColor(123, 17, 19);

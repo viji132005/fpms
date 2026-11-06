@@ -21,6 +21,7 @@ import {
 } from '../utils/timetableMultiSection.ts';
 import {
   CalendarDays,
+  Calendar,
   CheckCircle2,
   AlertTriangle,
   Clock,
@@ -797,9 +798,6 @@ export const TimetableManagement: React.FC = () => {
               <ShieldCheck className="w-3.5 h-3.5 text-slate-300" />
               {isAdmin ? 'ADMIN AUTHORITATIVE SCHEDULING' : `${user?.role} TIMETABLE PORTAL`}
             </span>
-            <span className="text-xs text-rose-200/80 font-mono">
-              {activeDeptCode} · MIT MYSORE
-            </span>
           </div>
           <h1 className="text-xl font-extrabold tracking-tight">
             Faculty Academic Subject Assignment and Timetable Creation
@@ -908,29 +906,26 @@ export const TimetableManagement: React.FC = () => {
             </button>
           </div>
 
-          {/* Dynamic Cohort-Aware Year & Semester Selector */}
+          {/* Dynamic Cohort-Aware Year & Semester Display */}
           <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-slate-200 text-xs">
             <div className="flex items-center gap-1">
               {[1, 2, 3, 4].map((yr) => {
                 const isSelected = selectedYear === yr;
-                const activeSem = studentSemestersByYear[yr] || getSemestersForYear(yr)[0];
                 return (
                   <button
                     key={yr}
                     onClick={() => {
                       setSelectedYear(yr);
-                      setSelectedSemester(activeSem);
+                      const sem = studentSemestersByYear[yr] || (yr * 2);
+                      setSelectedSemester(sem);
                     }}
-                    className={`px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-left transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-[#7B1113] text-white font-bold shadow-sm'
                         : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                     }`}
                   >
-                    <span>{yr === 1 ? '1st' : yr === 2 ? '2nd' : yr === 3 ? '3rd' : '4th'} Yr</span>
-                    <span className={`ml-1 text-[10px] ${isSelected ? 'text-rose-200' : 'text-slate-400'}`}>
-                      (Sem {activeSem})
-                    </span>
+                    <span>{yr === 1 ? '1st' : yr === 2 ? '2nd' : yr === 3 ? '3rd' : '4th'} Year</span>
                   </button>
                 );
               })}
@@ -938,18 +933,12 @@ export const TimetableManagement: React.FC = () => {
 
             <span className="text-slate-300">|</span>
 
-            <span className="text-slate-500 font-medium">Sem:</span>
-            <select
-              value={selectedSemester}
-              onChange={(e) => setSelectedSemester(Number(e.target.value))}
-              className="font-bold text-[#7B1113] bg-transparent focus:outline-none cursor-pointer"
-            >
-              {allowedSemesters.map((s) => (
-                <option key={s} value={s}>
-                  {s}th Sem ({getSemesterRoman(s)} Sem)
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 text-[#7B1113] border border-rose-200 rounded-lg font-bold text-xs">
+              <Calendar className="w-3.5 h-3.5 text-[#7B1113]" />
+              <span>
+                {selectedSemester}th Semester ({getSemesterRoman(selectedSemester)} Sem)
+              </span>
+            </div>
 
             {adminTab !== 'subjects' && (
               <>
@@ -984,9 +973,6 @@ export const TimetableManagement: React.FC = () => {
                   Academic Subjects: {selectedYear === 1 ? '1st' : selectedYear === 2 ? '2nd' : selectedYear === 3 ? '3rd' : '4th'} Year · {selectedSemester}th Semester ({getSemesterRoman(selectedSemester)} Sem)
                 </span>
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Configure syllabus course codes, official titles, and short abbreviations required for timetable generation.
-              </p>
             </div>
 
             <div className="flex items-center gap-2 shrink-0 flex-wrap">
@@ -1606,7 +1592,7 @@ export const TimetableManagement: React.FC = () => {
                       : `DEPARTMENT OF ${activeDeptName.toUpperCase()}`}
                   </h3>
                   <p className="text-[11px] text-slate-600 font-medium">
-                    Belagola, Srirangapatna Taluk, Mandya - 571 477 · Affiliated to VTU, Belagavi
+                    Belawadi, Srirangapatna Taluk, Mandya - 571 477 · Affiliated to VTU, Belagavi
                   </p>
                 </div>
               </div>

@@ -1,4 +1,4 @@
-import {
+import type {
   AcademicSubject,
   SubjectAllocationRecord,
   StructuredTimetable,

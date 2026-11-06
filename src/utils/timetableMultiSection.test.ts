@@ -8,7 +8,7 @@ import {
   MITM_DAYS,
   MITM_PERIOD_DEFINITIONS,
 } from './timetableMultiSection.ts';
-import { SubjectAllocationRecord } from '../types/index.ts';
+import type { SubjectAllocationRecord } from '../types/index.ts';
 
 test('getSemestersForYear returns correct semesters per year', () => {
   assert.deepEqual(getSemestersForYear(1), [1, 2]);
