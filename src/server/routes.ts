@@ -1688,7 +1688,7 @@ apiRouter.post(
   authMiddleware,
   requireRole(['ADMIN', 'HOD']),
   (req: AuthenticatedRequest, res: Response) => {
-    const { students: rawRows, departmentId, defaultYear } = req.body;
+    const { students: rawRows, departmentId, defaultYear, defaultSemester } = req.body;
     if (!Array.isArray(rawRows) || rawRows.length === 0) {
       return res.status(400).json({ error: 'No student rows provided for import.' });
     }
@@ -1696,6 +1696,19 @@ apiRouter.post(
     const data = db.getData();
     const activeDeptId = departmentId || data.institution.defaultDepartmentId || 'dept-ise';
     const fallbackYear = Number(defaultYear) || 1;
+
+    // Determine overall department systematic cycle (ODD vs EVEN)
+    const deptActiveStudents = data.students.filter(
+      (s) => s.departmentId === activeDeptId && s.status === 'ACTIVE'
+    );
+    let deptOdd = 0;
+    let deptEven = 0;
+    for (const s of deptActiveStudents) {
+      const sSem = s.currentSemester || (s.currentYear === 1 ? 1 : s.currentYear === 2 ? 3 : s.currentYear === 3 ? 5 : 7);
+      if (sSem % 2 === 1) deptOdd++;
+      else deptEven++;
+    }
+    const deptCycle: 'ODD' | 'EVEN' = deptEven > deptOdd && deptActiveStudents.length > 0 ? 'EVEN' : 'ODD';
 
     let importedCount = 0;
     let updatedCount = 0;
@@ -1732,15 +1745,62 @@ apiRouter.post(
         ''
       ).trim();
 
+      // Check if semester is explicitly provided in the row (1 to 8)
+      const rawSemNumber = Number(
+        normalized.semester ||
+        normalized.sem ||
+        normalized.currentsemester ||
+        normalized.semesternumber ||
+        normalized.term ||
+        0
+      );
+      const isExplicitSem = rawSemNumber >= 1 && rawSemNumber <= 8;
+
       const parsedYear = Number(
         normalized.year ||
         normalized.currentyear ||
         normalized.cohort ||
         normalized.cohortyear ||
-        (normalized.semester ? Math.ceil(Number(normalized.semester) / 2) : 0) ||
-        (normalized.sem ? Math.ceil(Number(normalized.sem) / 2) : 0)
+        (isExplicitSem ? Math.ceil(rawSemNumber / 2) : 0)
       );
       const studentYear = parsedYear >= 1 && parsedYear <= 4 ? parsedYear : fallbackYear;
+
+      // Systematic VTU semester based on department cycle:
+      // ODD term: Year 1 -> Sem 1, Year 2 -> Sem 3, Year 3 -> Sem 5, Year 4 -> Sem 7
+      // EVEN term: Year 1 -> Sem 2, Year 2 -> Sem 4, Year 3 -> Sem 6, Year 4 -> Sem 8
+      const systematicSem = deptCycle === 'EVEN' ? studentYear * 2 : studentYear * 2 - 1;
+
+      let studentSem: number;
+      if (isExplicitSem) {
+        if ((rawSemNumber % 2 === 1 && deptCycle === 'ODD') || (rawSemNumber % 2 === 0 && deptCycle === 'EVEN')) {
+          studentSem = rawSemNumber;
+        } else {
+          studentSem = systematicSem;
+        }
+      } else if (
+        defaultSemester &&
+        Number(defaultSemester) >= 1 &&
+        Number(defaultSemester) <= 8 &&
+        Math.ceil(Number(defaultSemester) / 2) === studentYear
+      ) {
+        studentSem = Number(defaultSemester);
+      } else {
+        studentSem = systematicSem;
+      }
+
+      // Format section if present in row
+      const rawSec = String(
+        normalized.section ||
+        normalized.currentsection ||
+        normalized.sec ||
+        ''
+      ).trim();
+      let studentSection = 'Section A';
+      if (rawSec) {
+        studentSection = rawSec.toUpperCase().startsWith('SECTION')
+          ? rawSec
+          : `Section ${rawSec.replace(/[^A-Za-z0-9]/g, '').toUpperCase()}`;
+      }
 
       const email = String(
         normalized.email ||
@@ -1786,6 +1846,8 @@ apiRouter.post(
         if (phone) existing.phone = phone;
         if (parentPhone) existing.parentPhone = parentPhone;
         existing.currentYear = studentYear;
+        existing.currentSemester = studentSem;
+        if (rawSec) existing.section = studentSection;
         existing.departmentId = activeDeptId;
         updatedCount++;
       } else {
@@ -1798,8 +1860,8 @@ apiRouter.post(
           parentPhone,
           departmentId: activeDeptId,
           currentYear: studentYear,
-          currentSemester: studentYear * 2, // Even sem in running term
-          section: 'Section A',
+          currentSemester: studentSem,
+          section: studentSection,
           admissionCohort: String(new Date().getFullYear() - (studentYear - 1)),
           status: 'ACTIVE',
         });
@@ -2017,8 +2079,13 @@ apiRouter.post(
       req
     );
 
+    const message = summary.cycleCompleted === 'ODD'
+      ? `Successfully advanced ${summary.promotedCount} students from Odd Semesters (1st, 3rd, 5th, 7th) to Even Semesters (2nd, 4th, 6th, 8th).`
+      : `Successfully executed annual academic progression! ${summary.promotedCount} students advanced to senior cohorts, ${summary.graduatedCount} 4th-year students graduated to alumni. 1st Year is now vacant for new admissions.`;
+
     return res.json({
       success: true,
+      message,
       summary,
       historyRecords,
     });
@@ -4498,28 +4565,72 @@ apiRouter.get(
     try {
       const data = db.getData();
       const currentUser = req.user!;
+      const now = Date.now();
+
+      // Automatically purge expired notifications from database if not saved by any user
+      if (Array.isArray(data.notifications)) {
+        const initialCount = data.notifications.length;
+        data.notifications = data.notifications.filter((n) => {
+          if (n.validUntil) {
+            const exp = new Date(n.validUntil).getTime();
+            if (exp < now) {
+              const isSavedByAnyone = Array.isArray(n.savedByUserIds) && n.savedByUserIds.length > 0;
+              return isSavedByAnyone;
+            }
+          }
+          return true;
+        });
+        if (data.notifications.length !== initialCount) {
+          db.save();
+        }
+      }
+
       const notifs = (data.notifications || []).filter((n) => {
-        // Direct recipient
+        // If user hid/deleted this notification from their inbox
+        if (n.hiddenByUserIds && n.hiddenByUserIds.includes(currentUser.id)) {
+          return false;
+        }
+
+        // Check if expired for this user (unless bookmarked/saved)
+        if (n.validUntil && new Date(n.validUntil).getTime() < now) {
+          const isSavedByMe = n.savedByUserIds && n.savedByUserIds.includes(currentUser.id);
+          if (!isSavedByMe) return false;
+        }
+
+        // Direct recipient or broadcast
         if (n.recipientUserId === currentUser.id || n.recipientUserId === 'ALL') return true;
+        if (n.recipientUserId === 'FACULTY' && currentUser.role === 'FACULTY') return true;
+
         // Author of circular always sees their circulated notices
-        if (n.type === 'CIRCULAR' && n.actorUserId === currentUser.id) return true;
+        if (n.actorUserId === currentUser.id) return true;
+
         // Circulars sent by institution ADMIN / Master Admin are visible to all users
         if (n.type === 'CIRCULAR') {
           const author = data.users.find((u) => u.id === n.actorUserId);
           if (author?.role === 'ADMIN') return true;
           // If sent by HOD of the current user's department
           if (currentUser.departmentId && author?.departmentId === currentUser.departmentId) return true;
+          // In academic institution, circulars without restriction are open
+          if (!n.recipientUserId || n.recipientUserId === 'ALL') return true;
         }
         return false;
       });
 
-      // Deduplicate by notification id and compute user-specific isRead and isSaved
+      // Deduplicate circulars by actorUserId + title + approximate timestamp to fix legacy 20-copy bugs
       const seen = new Set<string>();
       const result: Notification[] = [];
       for (const n of notifs) {
-        if (!seen.has(n.id)) {
-          seen.add(n.id);
-          const isRead = n.isRead || (n.readByUserIds && n.readByUserIds.includes(currentUser.id)) || false;
+        const dedupeKey =
+          n.type === 'CIRCULAR'
+            ? `${n.actorUserId || 'actor'}_${n.title}_${(n.createdAt || '').substring(0, 16)}`
+            : n.id;
+
+        if (!seen.has(dedupeKey)) {
+          seen.add(dedupeKey);
+          const isRead =
+            (n.readByUserIds && n.readByUserIds.includes(currentUser.id)) ||
+            (n.recipientUserId === currentUser.id && !!n.isRead) ||
+            false;
           const isSaved = (n.savedByUserIds && n.savedByUserIds.includes(currentUser.id)) || false;
           result.push({
             ...n,
@@ -4544,18 +4655,30 @@ apiRouter.delete(
     try {
       const { id } = req.params;
       const data = db.getData();
-      const initialCount = (data.notifications || []).length;
-      data.notifications = (data.notifications || []).filter(
-        (n) =>
-          !(
-            n.id === id &&
-            (n.recipientUserId === req.user!.id ||
-              n.actorUserId === req.user!.id ||
-              req.user!.role === 'ADMIN')
-          )
-      );
+      const currentUser = req.user!;
+      const notif = (data.notifications || []).find((n) => n.id === id);
+
+      if (!notif) {
+        return res.json({ success: true, removed: 0 });
+      }
+
+      // If user is Admin or the author or direct private recipient, delete from database
+      if (
+        currentUser.role === 'ADMIN' ||
+        notif.actorUserId === currentUser.id ||
+        notif.recipientUserId === currentUser.id
+      ) {
+        data.notifications = (data.notifications || []).filter((n) => n.id !== id);
+      } else {
+        // Otherwise hide it from this user's view
+        if (!notif.hiddenByUserIds) notif.hiddenByUserIds = [];
+        if (!notif.hiddenByUserIds.includes(currentUser.id)) {
+          notif.hiddenByUserIds.push(currentUser.id);
+        }
+      }
+
       db.save();
-      return res.json({ success: true, removed: initialCount - data.notifications.length });
+      return res.json({ success: true });
     } catch (err: any) {
       return res.status(500).json({ error: 'Failed to delete notification' });
     }
@@ -4573,18 +4696,41 @@ apiRouter.post(
       }
       const idSet = new Set(ids);
       const data = db.getData();
-      const initialCount = (data.notifications || []).length;
-      data.notifications = (data.notifications || []).filter(
-        (n) =>
-          !(
-            idSet.has(n.id) &&
-            (n.recipientUserId === req.user!.id ||
-              n.actorUserId === req.user!.id ||
-              req.user!.role === 'ADMIN')
-          )
-      );
+      const currentUser = req.user!;
+
+      (data.notifications || []).forEach((n) => {
+        if (idSet.has(n.id)) {
+          if (
+            currentUser.role === 'ADMIN' ||
+            n.actorUserId === currentUser.id ||
+            n.recipientUserId === currentUser.id
+          ) {
+            // mark for global removal
+          } else {
+            if (!n.hiddenByUserIds) n.hiddenByUserIds = [];
+            if (!n.hiddenByUserIds.includes(currentUser.id)) {
+              n.hiddenByUserIds.push(currentUser.id);
+            }
+          }
+        }
+      });
+
+      // Filter out permanently deleted ones
+      data.notifications = (data.notifications || []).filter((n) => {
+        if (idSet.has(n.id)) {
+          if (
+            currentUser.role === 'ADMIN' ||
+            n.actorUserId === currentUser.id ||
+            n.recipientUserId === currentUser.id
+          ) {
+            return false;
+          }
+        }
+        return true;
+      });
+
       db.save();
-      return res.json({ success: true, removedCount: initialCount - data.notifications.length });
+      return res.json({ success: true, removedCount: ids.length });
     } catch (err: any) {
       return res.status(500).json({ error: 'Failed to batch delete notifications' });
     }
@@ -4597,10 +4743,24 @@ apiRouter.delete(
   (req: AuthenticatedRequest, res: Response) => {
     try {
       const data = db.getData();
-      // Remove direct notifications for this user
+      const currentUser = req.user!;
+
+      // Permanently remove direct or authored notifications, and hide broadcasts
+      (data.notifications || []).forEach((n) => {
+        if (n.recipientUserId === currentUser.id || n.actorUserId === currentUser.id) {
+          // Will be filtered out
+        } else {
+          if (!n.hiddenByUserIds) n.hiddenByUserIds = [];
+          if (!n.hiddenByUserIds.includes(currentUser.id)) {
+            n.hiddenByUserIds.push(currentUser.id);
+          }
+        }
+      });
+
       data.notifications = (data.notifications || []).filter(
-        (n) => n.recipientUserId !== req.user!.id && n.actorUserId !== req.user!.id
+        (n) => !(n.recipientUserId === currentUser.id || n.actorUserId === currentUser.id)
       );
+
       db.save();
       return res.json({ success: true });
     } catch (err: any) {
@@ -4719,59 +4879,50 @@ apiRouter.post(
       finalValidUntil = new Date(Date.now() + dur * 24 * 60 * 60 * 1000).toISOString();
     }
 
-    // Filter recipients based on role and target audience
-    let recipients = data.users.filter((u) => u.status === 'ACTIVE');
-    if (req.user!.role === 'HOD' && req.user!.departmentId) {
-      recipients = recipients.filter((u) => u.departmentId === req.user!.departmentId);
-    }
-
-    if (targetAudience === 'FACULTY') {
-      recipients = recipients.filter((u) => u.role === 'FACULTY');
-    }
-
-    // Always ensure the sender themselves gets a notification record so they see their own circular
-    if (!recipients.some((r) => r.id === req.user!.id)) {
-      const self = data.users.find((u) => u.id === req.user!.id);
-      if (self) recipients.push(self);
-    }
-
-    const createdNotifications: Notification[] = [];
     const now = new Date().toISOString();
+    const todayDate = now.split('T')[0];
 
-    for (const r of recipients) {
-      const notif: Notification = {
-        id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        recipientUserId: r.id,
-        actorUserId: req.user!.id,
-        actorName,
-        title: circularNumber ? `Official Circular #${circularNumber}: ${title}` : title,
-        message,
-        type: 'CIRCULAR',
-        circularNumber: circularNumber || undefined,
-        circularDate: circularDate || now.split('T')[0],
-        attachmentUrl: attachmentUrl || undefined,
-        attachmentName: attachmentName || undefined,
-        durationDays: dur,
-        validUntil: finalValidUntil,
-        isRead: false,
-        createdAt: now,
-      };
-      data.notifications.unshift(notif);
-      createdNotifications.push(notif);
-    }
+    const dept = data.departments.find((d) => d.id === req.user!.departmentId);
+    const deptCode = dept?.code || 'INST';
+    const autoRefNo =
+      circularNumber?.trim() ||
+      `MITM/${deptCode}/CIR/${new Date().getFullYear()}/${Math.floor(100 + Math.random() * 900)}`;
 
+    // Create exactly ONE single broadcast notification record instead of duplicating per user
+    const singleNotif: Notification = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      recipientUserId: targetAudience === 'FACULTY' ? 'FACULTY' : 'ALL',
+      actorUserId: req.user!.id,
+      actorName,
+      title: title.trim(),
+      message: message.trim(),
+      type: 'CIRCULAR',
+      circularNumber: autoRefNo,
+      circularDate: todayDate,
+      attachmentUrl: attachmentUrl || undefined,
+      attachmentName: attachmentName || undefined,
+      durationDays: dur,
+      validUntil: finalValidUntil,
+      isRead: false,
+      readByUserIds: [req.user!.id], // sender already read their own circular
+      savedByUserIds: [],
+      hiddenByUserIds: [],
+      createdAt: now,
+    };
+
+    data.notifications.unshift(singleNotif);
     db.save();
 
     logAudit(
       { id: req.user!.id, email: req.user!.email, role: req.user!.role },
       'CIRCULATE_OFFICIAL_NOTICE',
       'CIRCULAR',
-      circularNumber || 'notice',
-      `Circulated official notice: "${title}" to ${createdNotifications.length} user(s).`,
+      autoRefNo,
+      `Circulated official notice: "${title}" (Target: ${targetAudience === 'FACULTY' ? 'Faculty' : 'All Staff'}).`,
       req
     );
 
-    return res.status(201).json({ success: true, count: createdNotifications.length });
+    return res.status(201).json({ success: true, count: 1 });
   }
 );
 
@@ -5208,6 +5359,86 @@ apiRouter.get(
       return res.send(csv);
     } catch (err: any) {
       return res.status(500).json({ error: 'Failed to export section allocation CSV.' });
+    }
+  }
+);
+
+apiRouter.delete(
+  '/section-allocations/:id',
+  authMiddleware,
+  requireRole(['ADMIN']),
+  (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { id } = req.params;
+      const data = db.getData();
+      if (!data.sectionAllocationRuns) data.sectionAllocationRuns = [];
+
+      const index = data.sectionAllocationRuns.findIndex((r) => r.id === id);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Section allocation run not found.' });
+      }
+
+      const run = data.sectionAllocationRuns[index];
+      data.sectionAllocationRuns.splice(index, 1);
+      db.save();
+
+      logAudit(
+        { id: req.user!.id, email: req.user!.email, role: req.user!.role },
+        'DELETE_SECTION_ALLOCATION',
+        'SECTION_ALLOCATION',
+        id,
+        `Deleted section allocation record ${id} (Year ${run.yearOfStudy}, Sem ${run.semester || 'N/A'}, AY ${run.academicYear}) with ${run.totalStudentsCount} students.`,
+        req
+      );
+
+      return res.json({
+        success: true,
+        message: 'Committed section allocation record deleted successfully.',
+      });
+    } catch (err: any) {
+      console.error('Delete section allocation failed:', err);
+      return res.status(500).json({ error: 'Failed to delete section allocation record.' });
+    }
+  }
+);
+
+apiRouter.post(
+  '/section-allocations/clear-history',
+  authMiddleware,
+  requireRole(['ADMIN']),
+  (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { departmentId, yearOfStudy } = req.body;
+      const data = db.getData();
+      if (!data.sectionAllocationRuns) data.sectionAllocationRuns = [];
+
+      const initialCount = data.sectionAllocationRuns.length;
+      data.sectionAllocationRuns = data.sectionAllocationRuns.filter((r) => {
+        if (departmentId && r.departmentId !== departmentId) return true;
+        if (yearOfStudy !== undefined && yearOfStudy !== null && r.yearOfStudy !== Number(yearOfStudy)) return true;
+        return false;
+      });
+
+      const clearedCount = initialCount - data.sectionAllocationRuns.length;
+      db.save();
+
+      logAudit(
+        { id: req.user!.id, email: req.user!.email, role: req.user!.role },
+        'CLEAR_SECTION_ALLOCATION_HISTORY',
+        'SECTION_ALLOCATION',
+        departmentId || 'ALL',
+        `Cleared ${clearedCount} section allocation records for department ${departmentId || 'ALL'}${yearOfStudy ? ` (Year ${yearOfStudy})` : ''}.`,
+        req
+      );
+
+      return res.json({
+        success: true,
+        clearedCount,
+        message: `Successfully cleared ${clearedCount} section allocation records.`,
+      });
+    } catch (err: any) {
+      console.error('Clear section allocation history failed:', err);
+      return res.status(500).json({ error: 'Failed to clear section allocation history.' });
     }
   }
 );

@@ -317,14 +317,23 @@ export function exportSectionAllocationCsv(run: StudentSectionAllocationRun): st
   return rows.map((r) => r.join(',')).join('\n');
 }
 
+export interface SectionAllocationPdfOptions {
+  includeCgpa?: boolean;
+  selectedSection?: string; // 'ALL' or specific section name, e.g. 'Section A'
+}
+
 /**
  * Print-Ready Official PDF Generation using jsPDF
+ * Professionally formatted for VTU / college notice boards and administrative archives.
  */
 export function generateSectionAllocationPdf(
   run: StudentSectionAllocationRun,
   institutionName: string = 'MAHARAJA INSTITUTE OF TECHNOLOGY MYSORE',
-  deptName: string = 'DEPARTMENT OF INFORMATION SCIENCE AND ENGINEERING'
+  deptName: string = 'DEPARTMENT OF INFORMATION SCIENCE AND ENGINEERING',
+  options: SectionAllocationPdfOptions = {}
 ): jsPDF {
+  const { includeCgpa = false, selectedSection = 'ALL' } = options;
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -332,149 +341,233 @@ export function generateSectionAllocationPdf(
   });
 
   const pageWidth = doc.internal.pageSize.getWidth();
-  let y = 14;
+  const leftMargin = 14;
+  const rightMargin = 14;
+  const contentWidth = pageWidth - leftMargin - rightMargin;
 
-  // Header Banner
+  // Filter sections to render
+  const sectionsToRender =
+    selectedSection && selectedSection !== 'ALL'
+      ? run.sections.filter((s) => s.name.toUpperCase() === selectedSection.toUpperCase())
+      : run.sections;
+
+  const totalAllocatedStudents = sectionsToRender.reduce(
+    (sum, sec) => sum + (run.summary.sectionCounts[sec.name] || 0),
+    0
+  );
+
+  let y = 13;
+
+  // 1. Institution Header Banner
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
+  doc.setFontSize(12.5);
   doc.setTextColor(123, 17, 19); // MIT Mysore Maroon #7B1113
   doc.text(institutionName.toUpperCase(), pageWidth / 2, y, { align: 'center' });
 
-  y += 5.5;
-  doc.setFontSize(10);
+  y += 5.2;
+  doc.setFontSize(9.5);
   doc.setTextColor(30, 41, 59); // Slate-800
   doc.text(deptName.toUpperCase(), pageWidth / 2, y, { align: 'center' });
 
-  y += 4.5;
+  y += 4.2;
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
-  doc.text('Belawadi, Srirangapatna Taluk, Mandya - 571 477 · Affiliated to VTU, Belagavi', pageWidth / 2, y, { align: 'center' });
+  doc.text('Affiliated to VTU, Belagavi · Approved by AICTE, New Delhi · Belawadi, Srirangapatna Taluk, Mandya', pageWidth / 2, y, { align: 'center' });
 
-  y += 4;
+  y += 3.8;
   doc.setDrawColor(123, 17, 19);
-  doc.setLineWidth(0.6);
-  doc.line(14, y, pageWidth - 14, y);
+  doc.setLineWidth(0.5);
+  doc.line(leftMargin, y, pageWidth - rightMargin, y);
 
-  y += 6;
+  // 2. Clean, Professional Document Title & Metadata
+  y += 5.5;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
+  doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  const titleText = `OFFICIAL STUDENT SECTION ALLOCATION ROSTER — ACADEMIC YEAR ${run.academicYear}`;
-  doc.text(titleText, pageWidth / 2, y, { align: 'center' });
+  const docTitle = selectedSection !== 'ALL'
+    ? `SECTION ALLOCATION ROSTER — ${selectedSection.toUpperCase()}`
+    : 'STUDENT SECTION ALLOCATION ROSTER';
+  doc.text(docTitle, pageWidth / 2, y, { align: 'center' });
 
   y += 4.5;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(71, 85, 105);
-  const subText = `Cohort: Year ${run.yearOfStudy}${run.semester ? ` (Semester ${run.semester})` : ''} | Method: ${run.method === 'PERFORMANCE' ? `Stratified Academic Balancing (${run.performanceMetric})` : 'Random Balanced Allocation'} | Total Students: ${run.totalStudentsCount}`;
-  doc.text(subText, pageWidth / 2, y, { align: 'center' });
 
-  y += 6;
+  const cohortSemesterText = run.semester
+    ? `Year ${run.yearOfStudy} (Semester ${run.semester})`
+    : `Year ${run.yearOfStudy}`;
+  const metadataText = `Academic Year: ${run.academicYear}   |   ${cohortSemesterText}   |   Total Students: ${totalAllocatedStudents}`;
+  doc.text(metadataText, pageWidth / 2, y, { align: 'center' });
 
-  // Section Summary Table Box
-  doc.setFillColor(248, 250, 252);
-  doc.rect(14, y, pageWidth - 28, 14, 'F');
-  doc.setDrawColor(203, 213, 225);
-  doc.setLineWidth(0.3);
-  doc.rect(14, y, pageWidth - 28, 14, 'S');
+  y += 5;
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(15, 23, 42);
-  let summaryX = 18;
-  run.sections.forEach((sec) => {
+  // 3. Section Summary Card(s) - Clean, Uncrowded, NO "(Cap: 999)"
+  const colCount = Math.min(sectionsToRender.length, 4);
+  const colWidth = (contentWidth - (colCount - 1) * 3) / colCount;
+  const boxHeight = 11;
+
+  sectionsToRender.forEach((sec, idx) => {
+    const colIdx = idx % colCount;
+    const cardX = leftMargin + colIdx * (colWidth + 3);
     const count = run.summary.sectionCounts[sec.name] || 0;
     const avg = run.summary.sectionAverages ? run.summary.sectionAverages[sec.name] : undefined;
-    doc.text(`${sec.name}: ${count} Students (Cap: ${sec.capacity})${avg ? ` | Avg ${run.performanceMetric}: ${avg}` : ''}`, summaryX, y + 8);
-    summaryX += (pageWidth - 36) / run.sections.length;
+
+    // Card background
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(cardX, y, colWidth, boxHeight, 1.5, 1.5, 'F');
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(cardX, y, colWidth, boxHeight, 1.5, 1.5, 'S');
+
+    // Section Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(123, 17, 19);
+    doc.text(sec.name.toUpperCase(), cardX + colWidth / 2, y + 4.2, { align: 'center' });
+
+    // Section Student Count & Optional CGPA
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(51, 65, 85);
+    const summaryLine = includeCgpa && avg !== undefined
+      ? `${count} Students  |  Avg CGPA: ${avg.toFixed(2)}`
+      : `${count} Students`;
+    doc.text(summaryLine, cardX + colWidth / 2, y + 8.5, { align: 'center' });
   });
 
-  y += 18;
+  y += boxHeight + 6;
 
-  // Render Section Tables
-  for (const sec of run.sections) {
+  // 4. Render Section Tables
+  sectionsToRender.forEach((sec, secIndex) => {
     const secStudents = run.students
-      .filter((s) => s.assignedSection === sec.name)
+      .filter((s) => s.assignedSection.toLowerCase() === sec.name.toLowerCase())
       .sort((a, b) => a.usn.localeCompare(b.usn));
 
-    // Check if new page needed
-    if (y > 240) {
+    // If printing all sections and not first section, give each section a clean new page
+    if (secIndex > 0 && y > 150) {
       doc.addPage();
       y = 15;
+    } else if (secIndex > 0) {
+      y += 6;
     }
 
-    // Section Subheader
+    // Section Subheader Banner
+    doc.setFillColor(123, 17, 19);
+    doc.rect(leftMargin, y, contentWidth, 6, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(123, 17, 19);
-    doc.text(`SECTION ALLOCATION: ${sec.name.toUpperCase()} (${secStudents.length} Students)`, 14, y);
-    y += 4;
+    doc.setFontSize(8.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`${sec.name.toUpperCase()} — OFFICIAL ROSTER (${secStudents.length} Students)`, leftMargin + 4, y + 4.2);
 
-    // Table Header
-    doc.setFillColor(241, 245, 249);
-    doc.rect(14, y, pageWidth - 28, 6.5, 'F');
-    doc.setDrawColor(148, 163, 184);
-    doc.rect(14, y, pageWidth - 28, 6.5, 'S');
+    y += 6;
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.setTextColor(30, 41, 59);
-    doc.text('SL', 16, y + 4.5);
-    doc.text('USN', 26, y + 4.5);
-    doc.text('STUDENT NAME', 60, y + 4.5);
-    doc.text('SEMESTER', 120, y + 4.5);
-    if (run.performanceMetric) {
-      doc.text(`${run.performanceMetric}`, 145, y + 4.5);
-      doc.text('PERFORMANCE BAND', 165, y + 4.5);
-    }
+    // Table Column Header (Clean widths, NO SEMESTER column)
+    const slColWidth = 14;
+    const usnColWidth = 38;
+    const cgpaColWidth = includeCgpa ? 28 : 0;
+    const nameColWidth = contentWidth - slColWidth - usnColWidth - cgpaColWidth;
 
-    y += 6.5;
+    const slX = leftMargin;
+    const usnX = slX + slColWidth;
+    const nameX = usnX + usnColWidth;
+    const cgpaX = nameX + nameColWidth;
 
-    // Table Rows
+    const renderTableHeader = (currentY: number) => {
+      doc.setFillColor(241, 245, 249);
+      doc.rect(leftMargin, currentY, contentWidth, 6, 'F');
+      doc.setDrawColor(148, 163, 184);
+      doc.setLineWidth(0.3);
+      doc.rect(leftMargin, currentY, contentWidth, 6, 'S');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(30, 41, 59);
+      doc.text('SL', slX + 4, currentY + 4.2);
+      doc.text('USN', usnX + 4, currentY + 4.2);
+      doc.text('STUDENT FULL NAME', nameX + 4, currentY + 4.2);
+      if (includeCgpa) {
+        doc.text('CGPA / SCORE', cgpaX + 4, currentY + 4.2);
+      }
+    };
+
+    renderTableHeader(y);
+    y += 6;
+
+    // Table Data Rows
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    doc.setTextColor(51, 65, 85);
+    doc.setFontSize(7.5);
 
     secStudents.forEach((st, idx) => {
+      // Check page break
       if (y > 275) {
         doc.addPage();
         y = 15;
+        // Repeat section subheader and table header on continuation page
+        doc.setFillColor(123, 17, 19);
+        doc.rect(leftMargin, y, contentWidth, 5.5, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(255, 255, 255);
+        doc.text(`${sec.name.toUpperCase()} (CONTINUED)`, leftMargin + 4, y + 3.8);
+        y += 5.5;
+        renderTableHeader(y);
+        y += 6;
       }
 
+      // Alternating row background
       if (idx % 2 === 1) {
         doc.setFillColor(248, 250, 252);
-        doc.rect(14, y, pageWidth - 28, 5.5, 'F');
+        doc.rect(leftMargin, y, contentWidth, 5.2, 'F');
       }
       doc.setDrawColor(226, 232, 240);
-      doc.line(14, y + 5.5, pageWidth - 14, y + 5.5);
+      doc.setLineWidth(0.2);
+      doc.line(leftMargin, y + 5.2, pageWidth - rightMargin, y + 5.2);
 
-      doc.text(String(idx + 1), 16, y + 4);
-      doc.setFont('courier', 'bold');
-      doc.text(st.usn, 26, y + 4);
+      // Sl No
       doc.setFont('helvetica', 'normal');
-      doc.text(st.fullName.substring(0, 32), 60, y + 4);
-      doc.text(`Sem ${st.currentSemester}`, 120, y + 4);
-      if (run.performanceMetric) {
-        doc.text(st.performanceValue !== null && st.performanceValue !== undefined ? st.performanceValue.toFixed(2) : 'N/A', 145, y + 4);
-        doc.text((st.bandName || 'N/A').substring(0, 26), 165, y + 4);
+      doc.setTextColor(71, 85, 105);
+      doc.text(String(idx + 1), slX + 4, y + 3.8);
+
+      // USN in Courier Bold
+      doc.setFont('courier', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(st.usn, usnX + 4, y + 3.8);
+
+      // Student Name
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(30, 41, 59);
+      // Give full generous width to name
+      const maxNameChars = includeCgpa ? 45 : 65;
+      doc.text(st.fullName.substring(0, maxNameChars), nameX + 4, y + 3.8);
+
+      // CGPA (if included)
+      if (includeCgpa) {
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        const scoreText =
+          st.performanceValue !== null && st.performanceValue !== undefined
+            ? st.performanceValue.toFixed(2)
+            : 'N/A';
+        doc.text(scoreText, cgpaX + 4, y + 3.8);
       }
 
-      y += 5.5;
+      y += 5.2;
     });
 
-    y += 8;
-  }
+    y += 6;
+  });
 
   // Footer on each page
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    doc.setFont('helvetica', 'italic');
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(148, 163, 184);
     doc.text(
-      `Maharaja Institute of Technology Mysore — FPMS Section Allocation System | Page ${i} of ${pageCount}`,
+      `Maharaja Institute of Technology Mysore — FPMS Section Allocation System   |   Page ${i} of ${pageCount}`,
       pageWidth / 2,
       290,
       { align: 'center' }
@@ -483,3 +576,4 @@ export function generateSectionAllocationPdf(
 
   return doc;
 }
+

@@ -256,16 +256,16 @@ export const TimetableManagement: React.FC = () => {
     authFetch(`/api/students?departmentId=${encodeURIComponent(activeDeptId)}&status=ACTIVE`)
       .then((r) => (r.ok ? r.json() : []))
       .then((students: any[]) => {
+        const map: Record<number, number> = { 1: 1, 2: 3, 3: 5, 4: 7 };
         if (Array.isArray(students) && students.length > 0) {
-          const map: Record<number, number> = { 1: 1, 2: 4, 3: 6, 4: 8 };
           [1, 2, 3, 4].forEach((yr) => {
             const yrStudents = students.filter((s) => s.currentYear === yr && s.currentSemester);
             if (yrStudents.length > 0) {
               map[yr] = yrStudents[0].currentSemester;
             }
           });
-          setStudentSemestersByYear(map);
         }
+        setStudentSemestersByYear(map);
       })
       .catch((err) => console.warn(err));
   };
@@ -916,7 +916,7 @@ export const TimetableManagement: React.FC = () => {
                     key={yr}
                     onClick={() => {
                       setSelectedYear(yr);
-                      const sem = studentSemestersByYear[yr] || (yr * 2);
+                      const sem = studentSemestersByYear[yr] || (yr * 2 - 1);
                       setSelectedSemester(sem);
                     }}
                     className={`px-3 py-1.5 rounded-lg text-left transition-all cursor-pointer ${

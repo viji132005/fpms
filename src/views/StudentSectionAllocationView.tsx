@@ -19,6 +19,7 @@ import {
   generateSectionAllocationPdf,
   exportSectionAllocationCsv,
   type ExcelValidationResult,
+  type SectionAllocationPdfOptions,
 } from '../utils/sectionAllocationExcel.ts';
 import {
   SplitSquareVertical,
@@ -41,6 +42,8 @@ import {
   Calendar,
   Layers,
   ArrowLeft,
+  Trash2,
+  X,
 } from 'lucide-react';
 
 export const StudentSectionAllocationView: React.FC = () => {
@@ -114,13 +117,25 @@ export const StudentSectionAllocationView: React.FC = () => {
   const [historyRuns, setHistoryRuns] = useState<StudentSectionAllocationRun[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
+  // PDF Export Modal State
+  const [pdfModalRun, setPdfModalRun] = useState<StudentSectionAllocationRun | null>(null);
+  const [pdfSelectedSection, setPdfSelectedSection] = useState<string>('ALL');
+  const [pdfIncludeCgpa, setPdfIncludeCgpa] = useState<boolean>(false);
+  const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
+
+  // Committed Records Deletion & Purging State
+  const [recordToDelete, setRecordToDelete] = useState<StudentSectionAllocationRun | null>(null);
+  const [isDeletingRecord, setIsDeletingRecord] = useState<boolean>(false);
+  const [showClearHistoryModal, setShowClearHistoryModal] = useState<boolean>(false);
+  const [isClearingHistory, setIsClearingHistory] = useState<boolean>(false);
+
   // Fetch active running semesters per year from Student Management
   const fetchDeptSemesters = async () => {
     try {
       const res = await authFetch(`/api/students?departmentId=${encodeURIComponent(deptId)}&status=ACTIVE`);
       if (res.ok) {
         const students: Student[] = await res.json();
-        const semMap: Record<number, number> = { 1: 1, 2: 4, 3: 6, 4: 8 };
+        const semMap: Record<number, number> = { 1: 1, 2: 3, 3: 5, 4: 7 };
         [1, 2, 3, 4].forEach((yr) => {
           const yrStudents = students.filter((s) => s.currentYear === yr && s.currentSemester);
           if (yrStudents.length > 0) {
@@ -136,7 +151,7 @@ export const StudentSectionAllocationView: React.FC = () => {
           }
         });
         setDeptStudentSemesters(semMap);
-        setSelectedSemester(semMap[selectedYear] || selectedYear * 2);
+        setSelectedSemester(semMap[selectedYear] || (selectedYear * 2 - 1));
       }
     } catch (err) {
       console.warn('Could not sync student semester cycle:', err);
@@ -152,7 +167,7 @@ export const StudentSectionAllocationView: React.FC = () => {
     if (deptStudentSemesters[selectedYear]) {
       setSelectedSemester(deptStudentSemesters[selectedYear]);
     } else {
-      setSelectedSemester(selectedYear * 2);
+      setSelectedSemester(selectedYear * 2 - 1);
     }
   }, [selectedYear, deptStudentSemesters]);
 
@@ -512,17 +527,93 @@ export const StudentSectionAllocationView: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Export Official PDF
-  const handleExportPdf = (targetRun?: StudentSectionAllocationRun) => {
+  // Open PDF Export Configuration Modal
+  const handleOpenPdfModal = (targetRun?: StudentSectionAllocationRun) => {
     const run = targetRun || currentRun;
     if (!run) return;
+    setPdfModalRun(run);
+    setPdfSelectedSection('ALL');
+    setPdfIncludeCgpa(false);
+  };
 
-    const doc = generateSectionAllocationPdf(
-      run,
-      institution?.institutionName || 'MAHARAJA INSTITUTE OF TECHNOLOGY MYSORE',
-      deptName
-    );
-    doc.save(`MIT_Mysore_${deptCode}_Year${run.yearOfStudy}_Section_Allocation.pdf`);
+  const handleExportPdf = (targetRun?: StudentSectionAllocationRun) => {
+    handleOpenPdfModal(targetRun);
+  };
+
+  // Generate & Download PDF with selected options
+  const handleExecutePdfDownload = () => {
+    if (!pdfModalRun) return;
+    setIsExportingPdf(true);
+    try {
+      const doc = generateSectionAllocationPdf(
+        pdfModalRun,
+        institution?.institutionName || 'MAHARAJA INSTITUTE OF TECHNOLOGY MYSORE',
+        deptName,
+        {
+          includeCgpa: pdfIncludeCgpa,
+          selectedSection: pdfSelectedSection,
+        }
+      );
+      const sectionSlug =
+        pdfSelectedSection === 'ALL'
+          ? 'AllSections'
+          : pdfSelectedSection.replace(/[^a-zA-Z0-9]/g, '_');
+      const cgpaSlug = pdfIncludeCgpa ? '_WithCGPA' : '_Roster';
+      const semSlug = pdfModalRun.semester ? `_Sem${pdfModalRun.semester}` : '';
+      const filename = `MIT_Mysore_${deptCode}_Year${pdfModalRun.yearOfStudy}${semSlug}_${sectionSlug}${cgpaSlug}.pdf`;
+      doc.save(filename);
+      setPdfModalRun(null);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to generate PDF');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
+  // Delete Individual Committed Record
+  const handleDeleteRecord = async () => {
+    if (!recordToDelete) return;
+    setIsDeletingRecord(true);
+    try {
+      const res = await authFetch(`/api/section-allocations/${recordToDelete.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to delete committed record.');
+      }
+      setSuccessMessage('Committed section allocation record was deleted successfully.');
+      setRecordToDelete(null);
+      fetchHistory();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error deleting committed record.');
+    } finally {
+      setIsDeletingRecord(false);
+    }
+  };
+
+  // Clear All Committed Allocation History
+  const handleClearHistory = async () => {
+    setIsClearingHistory(true);
+    try {
+      const res = await authFetch('/api/section-allocations/clear-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ departmentId: deptId }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to clear allocation history.');
+      }
+      const data = await res.json();
+      setSuccessMessage(data.message || 'Committed allocation history was cleared successfully.');
+      setShowClearHistoryModal(false);
+      fetchHistory();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error clearing allocation history.');
+    } finally {
+      setIsClearingHistory(false);
+    }
   };
 
   // Filter students for Review Table (Clicking Section card filters to that section!)
@@ -668,7 +759,7 @@ export const StudentSectionAllocationView: React.FC = () => {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
                   {[1, 2, 3, 4].map((yr) => {
                     const isSelected = selectedYear === yr;
-                    const sem = deptStudentSemesters[yr] || yr * 2;
+                    const sem = deptStudentSemesters[yr] || (yr * 2 - 1);
                     return (
                       <button
                         key={yr}
@@ -1327,7 +1418,7 @@ export const StudentSectionAllocationView: React.FC = () => {
       {/* TAB 2: COMMITTED RECORDS (HISTORY) */}
       {activeTab === 'history' && (
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 animate-in fade-in-50">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
               <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <History className="w-4 h-4 text-[#7B1113]" />
@@ -1337,6 +1428,17 @@ export const StudentSectionAllocationView: React.FC = () => {
                 Saved section allotments for each year and cohort. Download official Excel and PDF rosters for distribution to students.
               </p>
             </div>
+            {user?.role === 'ADMIN' && historyRuns.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowClearHistoryModal(true)}
+                className="px-3 py-1.5 text-xs font-semibold text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto"
+                title="Clear all committed allocation records for this department"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear All Records</span>
+              </button>
+            )}
           </div>
 
           {isLoadingHistory ? (
@@ -1380,17 +1482,272 @@ export const StudentSectionAllocationView: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleExportPdf(run)}
+                      onClick={() => handleOpenPdfModal(run)}
                       className="px-3 py-1.5 text-xs font-semibold text-rose-800 bg-white hover:bg-rose-50 border border-rose-300 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <FileText className="w-3.5 h-3.5 text-rose-600" />
                       <span>Download PDF</span>
                     </button>
+                    {user?.role === 'ADMIN' && (
+                      <button
+                        type="button"
+                        onClick={() => setRecordToDelete(run)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-lg transition-colors cursor-pointer"
+                        title="Delete this committed record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* MODAL 1: PDF EXPORT OPTIONS (Notice Board vs Admin / Section Filtering) */}
+      {pdfModalRun && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 space-y-5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-700">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Export Section Allocation PDF</h3>
+                  <p className="text-xs text-slate-500">
+                    Year {pdfModalRun.yearOfStudy}{pdfModalRun.semester ? ` (Semester ${pdfModalRun.semester})` : ''} · Academic Year {pdfModalRun.academicYear}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPdfModalRun(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Section Selection */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700">Select Section to Export</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPdfSelectedSection('ALL')}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                    pdfSelectedSection === 'ALL'
+                      ? 'border-[#7B1113] bg-rose-50/50 ring-1 ring-[#7B1113]'
+                      : 'border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="text-xs font-bold text-slate-900">All Sections</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    Entire Cohort ({pdfModalRun.totalStudentsCount} Students)
+                  </div>
+                </button>
+                {pdfModalRun.sections.map((sec) => {
+                  const count = pdfModalRun.summary.sectionCounts[sec.name] || 0;
+                  const isSelected = pdfSelectedSection.toUpperCase() === sec.name.toUpperCase();
+                  return (
+                    <button
+                      key={sec.name}
+                      type="button"
+                      onClick={() => setPdfSelectedSection(sec.name)}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-[#7B1113] bg-rose-50/50 ring-1 ring-[#7B1113]'
+                          : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="text-xs font-bold text-slate-900">{sec.name} Only</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        {count} Students
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Privacy / Detail Level Selection */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700">Roster Detail & Academic Scores</label>
+              <div className="space-y-2">
+                <div
+                  onClick={() => setPdfIncludeCgpa(false)}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
+                    !pdfIncludeCgpa
+                      ? 'border-[#7B1113] bg-rose-50/40 ring-1 ring-[#7B1113]'
+                      : 'border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="pdfFormatOption"
+                    checked={!pdfIncludeCgpa}
+                    onChange={() => setPdfIncludeCgpa(false)}
+                    className="mt-0.5 text-[#7B1113] focus:ring-[#7B1113]"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                      <span>Standard Notice Board Roster (Student Copy)</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Includes Sl. No., USN, and Student Full Name only. Excludes CGPA/SGPA scores to protect student privacy on notice boards and classroom rosters.
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  onClick={() => setPdfIncludeCgpa(true)}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
+                    pdfIncludeCgpa
+                      ? 'border-[#7B1113] bg-rose-50/40 ring-1 ring-[#7B1113]'
+                      : 'border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="pdfFormatOption"
+                    checked={pdfIncludeCgpa}
+                    onChange={() => setPdfIncludeCgpa(true)}
+                    className="mt-0.5 text-[#7B1113] focus:ring-[#7B1113]"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-slate-900">
+                      Administrative Roster (Faculty / Department Copy)
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Includes Academic Scores (CGPA / SGPA) alongside student details and section averages. For HoD, faculty coordinators, and official academic records.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setPdfModalRun(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecutePdfDownload}
+                disabled={isExportingPdf}
+                className="px-4 py-2 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600D0F] rounded-xl flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>{isExportingPdf ? 'Generating PDF...' : 'Download PDF'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: DELETE SINGLE COMMITTED RECORD CONFIRMATION */}
+      {recordToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-6 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Delete Committed Record?</h3>
+                <p className="text-xs text-slate-500">
+                  Year {recordToDelete.yearOfStudy}{recordToDelete.semester ? ` (Semester ${recordToDelete.semester})` : ''} · Academic Year {recordToDelete.academicYear}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 space-y-1">
+              <p className="font-semibold">Notice for Academic Administrators:</p>
+              <p>
+                This will delete this specific section allotment record ({recordToDelete.totalStudentsCount} students across {recordToDelete.sections.length} sections) from the committed records list.
+              </p>
+              <p className="text-[11px] text-amber-700">
+                Student records in the main database will retain their current sections unless modified or re-allocated.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setRecordToDelete(null)}
+                disabled={isDeletingRecord}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteRecord}
+                disabled={isDeletingRecord}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingRecord ? 'Deleting...' : 'Delete Record'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: CLEAR ALL COMMITTED HISTORY CONFIRMATION */}
+      {showClearHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-6 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Clear All Committed History?</h3>
+                <p className="text-xs text-slate-500">Department: {deptName}</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 space-y-1">
+              <p className="font-bold">Irreversible Action:</p>
+              <p>
+                Are you sure you want to permanently clear all {historyRuns.length} committed section allocation records for this department?
+              </p>
+              <p className="text-[11px] text-rose-600">
+                Old and unwanted test or past records will be removed from the archive.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowClearHistoryModal(false)}
+                disabled={isClearingHistory}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleClearHistory}
+                disabled={isClearingHistory}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isClearingHistory ? 'Clearing...' : 'Clear All Records'}</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

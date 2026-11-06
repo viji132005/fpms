@@ -74,7 +74,7 @@ export function detectDepartmentSemesterCycle(
   );
 
   if (activeStudents.length === 0) {
-    return 'EVEN'; // default to even
+    return 'ODD'; // New academic batches always start in ODD semester (Sem 1, 3, 5, 7)
   }
 
   // Count odd vs even current semesters
@@ -160,11 +160,11 @@ export function generateSemesterProgressionPreview(
 
     let description = '';
     if (sem >= 8) {
-      description = `8th Sem (4th Year) Active Students -> GRADUATED Alumni`;
+      description = `4th Year (8th Sem) ➔ Graduated Alumni (Replaces Previous Graduated)`;
     } else if (cycle === 'ODD') {
-      description = `${formatOrdinal(sem)} Sem (${formatOrdinal(fromYear)} Year) -> ${formatOrdinal(sem + 1)} Sem (${formatOrdinal(fromYear)} Year)`;
+      description = `${formatOrdinal(fromYear)} Year: ${formatOrdinal(sem)} Sem ➔ ${formatOrdinal(sem + 1)} Sem (${formatOrdinal(fromYear)} Year)`;
     } else {
-      description = `${formatOrdinal(sem)} Sem (${formatOrdinal(fromYear)} Year) -> ${formatOrdinal(sem + 1)} Sem (${formatOrdinal(toYear)} Year)`;
+      description = `${formatOrdinal(fromYear)} Year (${formatOrdinal(sem)} Sem) ➔ ${formatOrdinal(toYear)} Year (${formatOrdinal(sem + 1)} Sem)`;
     }
 
     cohorts.push({

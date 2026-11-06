@@ -161,7 +161,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  const unreadCount = notifications.filter((n) => {
+    if (n.isRead) return false;
+    // Expired notices that are not bookmarked do not inflate the active unread counter
+    if (n.validUntil && new Date(n.validUntil).getTime() < Date.now() && !n.isSaved) {
+      return false;
+    }
+    return true;
+  }).length;
 
   const isMasterAdmin = Boolean(
     user?.role === 'ADMIN' &&

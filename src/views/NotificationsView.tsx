@@ -27,26 +27,24 @@ import {
 export const NotificationsView: React.FC = () => {
   const { user, department, notifications, refreshNotifications, setActiveTab, isMasterAdmin } = useAuth();
   const deptCode = department?.code || 'ISE';
+  const deptName = department?.name || 'Department of Information Science & Engineering';
 
   // Selection & Customize Delete
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [filterType, setFilterType] = useState<'ALL' | 'UNREAD' | 'CIRCULARS' | 'SAVED' | 'UPDATES'>('ALL');
+  const [filterType, setFilterType] = useState<'ALL' | 'UNREAD' | 'SAVED'>('ALL');
 
   // Modal for Admin/HOD to circulate circular
   const [showCirculateModal, setShowCirculateModal] = useState(false);
-  const [durationTypeChoice, setDurationTypeChoice] = useState<'PRESET' | 'CUSTOM'>('PRESET');
+  const [validityChoice, setValidityChoice] = useState<
+    'PERMANENT' | '3_DAYS' | '7_DAYS' | '15_DAYS' | '30_DAYS' | 'CUSTOM_DATE'
+  >('PERMANENT');
+  const [customExpiryDate, setCustomExpiryDate] = useState<string>('');
   const [circularForm, setCircularForm] = useState({
     title: '',
     message: '',
-    circularNumber: `MITM/${deptCode}/CIR/${new Date().getFullYear()}/${Math.floor(
-      100 + Math.random() * 900
-    )}`,
-    circularDate: new Date().toISOString().split('T')[0],
     attachmentUrl: '',
     attachmentName: '',
     targetAudience: 'ALL' as 'ALL' | 'FACULTY',
-    durationDays: 0, // 0 = Always Active
-    validUntil: '',
   });
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -204,17 +202,30 @@ export const NotificationsView: React.FC = () => {
 
   const handleCirculateCircular = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!circularForm.title || !circularForm.message) return;
+    if (!circularForm.title.trim() || !circularForm.message.trim()) return;
     setIsSending(true);
     setErrorMessage(null);
     setStatusMessage(null);
 
-    // Compute final validUntil if durationDays > 0 and validUntil not set manually
-    let calculatedValidUntil = circularForm.validUntil;
-    if (circularForm.durationDays > 0 && !calculatedValidUntil) {
-      calculatedValidUntil = new Date(
-        Date.now() + circularForm.durationDays * 24 * 60 * 60 * 1000
-      ).toISOString();
+    let finalValidUntil: string | undefined = undefined;
+    let finalDurationDays = 0;
+
+    if (validityChoice === '3_DAYS') {
+      finalDurationDays = 3;
+      finalValidUntil = new Date(Date.now() + 3 * 86400000).toISOString();
+    } else if (validityChoice === '7_DAYS') {
+      finalDurationDays = 7;
+      finalValidUntil = new Date(Date.now() + 7 * 86400000).toISOString();
+    } else if (validityChoice === '15_DAYS') {
+      finalDurationDays = 15;
+      finalValidUntil = new Date(Date.now() + 15 * 86400000).toISOString();
+    } else if (validityChoice === '30_DAYS') {
+      finalDurationDays = 30;
+      finalValidUntil = new Date(Date.now() + 30 * 86400000).toISOString();
+    } else if (validityChoice === 'CUSTOM_DATE' && customExpiryDate) {
+      finalValidUntil = new Date(customExpiryDate + 'T23:59:59').toISOString();
+      const diffMs = new Date(finalValidUntil).getTime() - Date.now();
+      finalDurationDays = Math.max(1, Math.ceil(diffMs / 86400000));
     }
 
     try {
@@ -222,8 +233,13 @@ export const NotificationsView: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...circularForm,
-          validUntil: calculatedValidUntil || undefined,
+          title: circularForm.title.trim(),
+          message: circularForm.message.trim(),
+          attachmentUrl: circularForm.attachmentUrl || undefined,
+          attachmentName: circularForm.attachmentName || undefined,
+          targetAudience: circularForm.targetAudience,
+          durationDays: finalDurationDays,
+          validUntil: finalValidUntil,
         }),
       });
       if (res.ok) {
@@ -231,17 +247,12 @@ export const NotificationsView: React.FC = () => {
         setCircularForm({
           title: '',
           message: '',
-          circularNumber: `MITM/${deptCode}/CIR/${new Date().getFullYear()}/${Math.floor(
-            100 + Math.random() * 900
-          )}`,
-          circularDate: new Date().toISOString().split('T')[0],
           attachmentUrl: '',
           attachmentName: '',
           targetAudience: 'ALL',
-          durationDays: 0,
-          validUntil: '',
         });
-        setDurationTypeChoice('PRESET');
+        setValidityChoice('PERMANENT');
+        setCustomExpiryDate('');
         setStatusMessage(
           'Official circular broadcasted successfully across the institution/department!'
         );
@@ -262,6 +273,12 @@ export const NotificationsView: React.FC = () => {
     return new Date(notif.validUntil).getTime() < Date.now();
   };
 
+  const isItemActive = (notif: Notification) => {
+    // If bookmarked/saved by user, keep it in active view!
+    if (notif.isSaved) return true;
+    return !isCircularExpired(notif);
+  };
+
   const isImageFile = (url: string, name?: string) => {
     if (url?.startsWith('data:image/')) return true;
     if (name) {
@@ -271,12 +288,17 @@ export const NotificationsView: React.FC = () => {
     return false;
   };
 
-  // Filter notifications
+  // Active items and counts (only active notices, expired ones are excluded unless saved)
+  const activeNotifications = notifications.filter(isItemActive);
+  const allActiveCount = activeNotifications.length;
+  const unreadActiveCount = activeNotifications.filter((n) => !n.isRead).length;
+  const savedCount = notifications.filter((n) => Boolean(n.isSaved)).length;
+
+  // Filter notifications based on selected tab: ALL, UNREAD, SAVED
   const filteredNotifications = notifications.filter((n) => {
-    if (filterType === 'UNREAD') return !n.isRead;
-    if (filterType === 'CIRCULARS') return n.type === 'CIRCULAR';
-    if (filterType === 'SAVED') return !!n.isSaved;
-    if (filterType === 'UPDATES') return n.type !== 'CIRCULAR';
+    if (filterType === 'ALL') return isItemActive(n);
+    if (filterType === 'UNREAD') return !n.isRead && isItemActive(n);
+    if (filterType === 'SAVED') return Boolean(n.isSaved);
     return true;
   });
 
@@ -361,58 +383,38 @@ export const NotificationsView: React.FC = () => {
 
       {/* FILTER & CUSTOMIZE SELECTION TOOLBAR */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-        {/* Filter Pills */}
+        {/* Exactly 3 Filter Pills: All, Unread, Saved */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <button
             onClick={() => setFilterType('ALL')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
               filterType === 'ALL'
                 ? 'bg-[#7B1113] text-white shadow-sm'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            All ({notifications.length})
+            All ({allActiveCount})
           </button>
           <button
             onClick={() => setFilterType('UNREAD')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
               filterType === 'UNREAD'
                 ? 'bg-[#7B1113] text-white shadow-sm'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            Unread ({notifications.filter((n) => !n.isRead).length})
-          </button>
-          <button
-            onClick={() => setFilterType('CIRCULARS')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-              filterType === 'CIRCULARS'
-                ? 'bg-[#7B1113] text-white shadow-sm'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            Official Circulars ({notifications.filter((n) => n.type === 'CIRCULAR').length})
+            Unread ({unreadActiveCount})
           </button>
           <button
             onClick={() => setFilterType('SAVED')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
               filterType === 'SAVED'
                 ? 'bg-[#7B1113] text-white shadow-sm'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
             <Bookmark className="w-3.5 h-3.5" />
-            <span>Saved Documents ({notifications.filter((n) => n.isSaved).length})</span>
-          </button>
-          <button
-            onClick={() => setFilterType('UPDATES')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-              filterType === 'UPDATES'
-                ? 'bg-[#7B1113] text-white shadow-sm'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            Academic Updates ({notifications.filter((n) => n.type !== 'CIRCULAR').length})
+            <span>Saved ({savedCount})</span>
           </button>
         </div>
 
@@ -421,7 +423,7 @@ export const NotificationsView: React.FC = () => {
           <div className="flex items-center gap-2 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
             <button
               onClick={handleSelectAll}
-              className="px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded-lg flex items-center gap-1.5 transition-colors border border-slate-200"
+              className="px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded-lg flex items-center gap-1.5 transition-colors border border-slate-200 cursor-pointer"
             >
               {selectedIds.size === filteredNotifications.length && filteredNotifications.length > 0 ? (
                 <CheckSquare className="w-3.5 h-3.5 text-[#7B1113]" />
@@ -434,7 +436,7 @@ export const NotificationsView: React.FC = () => {
             {selectedIds.size > 0 && (
               <button
                 onClick={() => setDeleteConfirmTarget('BATCH')}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-rose-700 hover:bg-rose-800 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors animate-in zoom-in-95"
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-rose-700 hover:bg-rose-800 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors animate-in zoom-in-95 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Delete Selected ({selectedIds.size})</span>
@@ -455,91 +457,75 @@ export const NotificationsView: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 shadow-sm overflow-hidden">
-          {filteredNotifications.map((notif) => {
-            const isSelected = selectedIds.has(notif.id);
-            const expired = isCircularExpired(notif);
+        <div className="space-y-3">
+          <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 shadow-sm overflow-hidden">
+            {filteredNotifications.map((notif) => {
+              const isSelected = selectedIds.has(notif.id);
+              const expired = isCircularExpired(notif);
 
-            return (
-              <div
-                key={notif.id}
-                className={`p-4 flex flex-col sm:flex-row sm:items-start justify-between gap-4 transition-colors ${
-                  isSelected
-                    ? 'bg-amber-50/40'
-                    : !notif.isRead
-                    ? 'bg-rose-50/20'
-                    : 'hover:bg-slate-50'
-                }`}
-              >
-                <div className="flex items-start gap-3 flex-1">
-                  {/* Select Checkbox */}
-                  <button
-                    type="button"
-                    onClick={(e) => handleToggleSelect(notif.id, e)}
-                    className="mt-1 text-slate-400 hover:text-slate-600 focus:outline-none"
-                    aria-label={isSelected ? 'Deselect item' : 'Select item'}
-                  >
-                    {isSelected ? (
-                      <CheckSquare className="w-4 h-4 text-[#7B1113]" />
-                    ) : (
-                      <Square className="w-4 h-4 text-slate-300" />
-                    )}
-                  </button>
-
-                  {/* Icon */}
-                  <div
-                    onClick={() => handleNotificationClick(notif)}
-                    className="p-2 rounded-lg bg-slate-100 text-slate-700 shrink-0 mt-0.5 cursor-pointer"
-                  >
-                    {notif.type === 'CIRCULAR' ? (
-                      <FileText className="w-4 h-4 text-[#7B1113]" />
-                    ) : notif.type === 'SUBMISSION_RETURNED' ? (
-                      <RotateCcw className="w-4 h-4 text-rose-600" />
-                    ) : notif.type === 'SUBMISSION_APPROVED' ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    ) : (
-                      <Bell className="w-4 h-4 text-[#7B1113]" />
-                    )}
-                  </div>
-
-                  {/* Main Content */}
-                  <div
-                    className="space-y-1.5 flex-1 cursor-pointer"
-                    onClick={() => handleNotificationClick(notif)}
-                  >
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-xs font-bold text-slate-900 hover:text-[#7B1113] transition-colors">
-                        {notif.title}
-                      </h3>
-                      {notif.circularNumber && (
-                        <span className="text-[10px] font-mono font-semibold text-[#7B1113] bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                          {notif.circularNumber}
-                        </span>
+              return (
+                <div
+                  key={notif.id}
+                  className={`p-4 flex flex-col sm:flex-row sm:items-start justify-between gap-4 transition-colors ${
+                    isSelected
+                      ? 'bg-amber-50/40'
+                      : !notif.isRead
+                      ? 'bg-rose-50/20'
+                      : 'hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-start gap-3 flex-1">
+                    {/* Select Checkbox */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleToggleSelect(notif.id, e)}
+                      className="mt-1 text-slate-400 hover:text-slate-600 focus:outline-none"
+                      aria-label={isSelected ? 'Deselect item' : 'Select item'}
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="w-4 h-4 text-[#7B1113]" />
+                      ) : (
+                        <Square className="w-4 h-4 text-slate-300" />
                       )}
+                    </button>
 
-                      {/* Expiration / Duration Status */}
-                      {expired ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                          <AlertTriangle className="w-3 h-3 text-rose-600" />
-                          <span>Notice Expired</span>
-                        </span>
-                      ) : notif.validUntil ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                          <Clock className="w-3 h-3" />
-                          <span>
-                            Valid until {notif.validUntil.split('T')[0]}
+                    {/* Icon */}
+                    <div
+                      onClick={() => handleNotificationClick(notif)}
+                      className="p-2 rounded-lg bg-slate-100 text-slate-700 shrink-0 mt-0.5 cursor-pointer"
+                    >
+                      {notif.type === 'CIRCULAR' ? (
+                        <FileText className="w-4 h-4 text-[#7B1113]" />
+                      ) : notif.type === 'SUBMISSION_RETURNED' ? (
+                        <RotateCcw className="w-4 h-4 text-rose-600" />
+                      ) : notif.type === 'SUBMISSION_APPROVED' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      ) : (
+                        <Bell className="w-4 h-4 text-[#7B1113]" />
+                      )}
+                    </div>
+
+                    {/* Main Content */}
+                    <div
+                      className="space-y-1.5 flex-1 cursor-pointer"
+                      onClick={() => handleNotificationClick(notif)}
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-xs font-bold text-slate-900 hover:text-[#7B1113] transition-colors">
+                          {notif.title}
+                        </h3>
+                        {notif.circularNumber && (
+                          <span className="text-[10px] font-mono font-semibold text-[#7B1113] bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                            {notif.circularNumber}
                           </span>
-                        </span>
-                      ) : notif.durationDays && notif.durationDays > 0 ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                          <Clock className="w-3 h-3" />
-                          <span>Valid for {notif.durationDays} days</span>
-                        </span>
-                      ) : notif.type === 'CIRCULAR' ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                          Active Broadcast
-                        </span>
-                      ) : null}
+                        )}
+
+                        {notif.isSaved && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                            <Bookmark className="w-3 h-3 fill-current text-amber-600" />
+                            <span>Saved</span>
+                          </span>
+                        )}
 
                       {!notif.isRead && (
                         <span className="w-2 h-2 rounded-full bg-[#7B1113]" />
@@ -550,9 +536,20 @@ export const NotificationsView: React.FC = () => {
                       {notif.message}
                     </p>
 
-                    {/* Attachment Action Bar: View & Direct Download */}
+                    {/* Attachment Action Bar: Direct Download & Preview */}
                     {notif.attachmentUrl && (
-                      <div className="pt-1.5 flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                      <div className="pt-2 flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                        {/* Direct Download Button */}
+                        <a
+                          href={notif.attachmentUrl}
+                          download={notif.attachmentName || `circular-${notif.id}.pdf`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg transition-colors shadow-sm cursor-pointer"
+                          title="Download attached official file directly"
+                        >
+                          <Download className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>Download Document {notif.attachmentName ? `(${notif.attachmentName})` : ''}</span>
+                        </a>
+
                         {/* View Preview Button */}
                         <button
                           type="button"
@@ -563,22 +560,11 @@ export const NotificationsView: React.FC = () => {
                               title: notif.title,
                             });
                           }}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-[#7B1113] bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer"
                         >
-                          <Eye className="w-3.5 h-3.5 text-[#7B1113]" />
-                          <span>Preview Document ({notif.attachmentName || 'Official Slip'})</span>
+                          <Eye className="w-3.5 h-3.5 text-slate-600" />
+                          <span>Preview Document</span>
                         </button>
-
-                        {/* Direct Download Button */}
-                        <a
-                          href={notif.attachmentUrl}
-                          download={notif.attachmentName || `circular-${notif.id}.pdf`}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg transition-colors shadow-sm"
-                          title="Download attached official file directly"
-                        >
-                          <Download className="w-3.5 h-3.5 text-emerald-700" />
-                          <span>Download File</span>
-                        </a>
                       </div>
                     )}
 
@@ -640,6 +626,7 @@ export const NotificationsView: React.FC = () => {
               </div>
             );
           })}
+          </div>
         </div>
       )}
 
@@ -667,69 +654,41 @@ export const NotificationsView: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleCirculateCircular} className="space-y-3.5 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Circular / Reference No.
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={circularForm.circularNumber}
-                    onChange={(e) =>
-                      setCircularForm({ ...circularForm, circularNumber: e.target.value })
-                    }
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Notice Date
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={circularForm.circularDate}
-                    onChange={(e) =>
-                      setCircularForm({ ...circularForm, circularDate: e.target.value })
-                    }
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  />
-                </div>
-              </div>
-
+            <form onSubmit={handleCirculateCircular} className="space-y-4 text-xs">
+              {/* Notice Title */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Notice Subject / Title *
+                <label className="block font-bold text-slate-800 mb-1">
+                  Circular Subject / Title <span className="text-rose-600">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Schedule for Academic Audit & Portfolio Verification"
+                  placeholder="e.g. Schedule for IA-1 Test & Continuous Internal Evaluation (CIE)"
                   value={circularForm.title}
                   onChange={(e) => setCircularForm({ ...circularForm, title: e.target.value })}
-                  className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#7B1113] text-xs bg-white"
                 />
               </div>
 
+              {/* Notice Description */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Circular Description & Instructions *
+                <label className="block font-bold text-slate-800 mb-1">
+                  Circular Content & Instructions <span className="text-rose-600">*</span>
                 </label>
                 <textarea
                   rows={4}
                   required
-                  placeholder="Detail the circular requirements, deadlines, and instructions..."
+                  placeholder="Detail the official notice, timetable, required actions, and instructions for faculty and staff..."
                   value={circularForm.message}
                   onChange={(e) => setCircularForm({ ...circularForm, message: e.target.value })}
-                  className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#7B1113] text-xs bg-white"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              {/* Target Audience & Notice Validity */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label className="block font-bold text-slate-800 mb-1">
                     Target Audience
                   </label>
                   <select
@@ -740,114 +699,88 @@ export const NotificationsView: React.FC = () => {
                         targetAudience: e.target.value as 'ALL' | 'FACULTY',
                       })
                     }
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#7B1113] text-xs bg-white cursor-pointer"
                   >
-                    <option value="ALL">All Staff & Faculty (Department / Institution)</option>
+                    <option value="ALL">All Staff & Faculty (Department / College)</option>
                     <option value="FACULTY">Teaching Faculty Only</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Validity Time Period
+                  <label className="block font-bold text-slate-800 mb-1">
+                    Notice Active Duration
                   </label>
                   <select
-                    value={durationTypeChoice === 'CUSTOM' ? 'CUSTOM' : circularForm.durationDays}
+                    value={validityChoice}
                     onChange={(e) => {
-                      if (e.target.value === 'CUSTOM') {
-                        setDurationTypeChoice('CUSTOM');
-                      } else {
-                        setDurationTypeChoice('PRESET');
-                        const days = Number(e.target.value);
-                        setCircularForm({
-                          ...circularForm,
-                          durationDays: days,
-                          validUntil: days > 0 ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : '',
-                        });
+                      const val = e.target.value as any;
+                      setValidityChoice(val);
+                      if (val !== 'CUSTOM_DATE') {
+                        setCustomExpiryDate('');
                       }
                     }}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#7B1113] text-xs bg-white cursor-pointer"
                   >
-                    <option value={0}>Always Active (Permanent Notice)</option>
-                    <option value={1}>1 Day (Urgent Priority Notice)</option>
-                    <option value={3}>3 Days</option>
-                    <option value={7}>7 Days (1 Week)</option>
-                    <option value={15}>15 Days</option>
-                    <option value={30}>30 Days (1 Month)</option>
-                    <option value="CUSTOM">Custom Time Period / Expiry Date...</option>
+                    <option value="PERMANENT">Permanent (Always Active — No Expiration)</option>
+                    <option value="3_DAYS">3 Days (Urgent / Immediate Action)</option>
+                    <option value="7_DAYS">7 Days (1 Week)</option>
+                    <option value="15_DAYS">15 Days (Fortnight)</option>
+                    <option value="30_DAYS">30 Days (1 Month)</option>
+                    <option value="CUSTOM_DATE">Specific Expiry Date...</option>
                   </select>
                 </div>
               </div>
 
-              {/* Customizable Time Period Inputs */}
-              {durationTypeChoice === 'CUSTOM' && (
-                <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-lg space-y-2 animate-in fade-in-50">
-                  <div className="flex items-center gap-1.5 text-amber-800 font-semibold text-[11px]">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>Custom Expiration & Time Period Settings</span>
+              {/* Single, Unambiguous Custom Expiry Date Input */}
+              {validityChoice === 'CUSTOM_DATE' && (
+                <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2 animate-in fade-in-50">
+                  <div className="flex items-center gap-1.5 text-amber-900 font-bold text-[11px]">
+                    <Clock className="w-3.5 h-3.5 text-amber-700" />
+                    <span>Select Specific Expiry Date</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-slate-700 font-medium mb-1">
-                        Active Duration (in Days)
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={365}
-                        placeholder="e.g. 5, 10, 45"
-                        value={circularForm.durationDays || ''}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          const dateStr = val > 0 ? new Date(Date.now() + val * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : '';
-                          setCircularForm({
-                            ...circularForm,
-                            durationDays: val,
-                            validUntil: dateStr,
-                          });
-                        }}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-700 font-medium mb-1">
-                        Specific Expiry Date
-                      </label>
-                      <input
-                        type="date"
-                        min={new Date().toISOString().split('T')[0]}
-                        value={circularForm.validUntil}
-                        onChange={(e) => {
-                          const dateVal = e.target.value;
-                          const diffMs = new Date(dateVal).getTime() - Date.now();
-                          const days = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-                          setCircularForm({
-                            ...circularForm,
-                            validUntil: dateVal,
-                            durationDays: days,
-                          });
-                        }}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                      />
-                    </div>
+                  <div>
+                    <input
+                      type="date"
+                      required
+                      min={new Date(Date.now() + 86400000).toISOString().split('T')[0]}
+                      value={customExpiryDate}
+                      onChange={(e) => setCustomExpiryDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#7B1113] text-xs font-mono"
+                    />
                   </div>
-                  <p className="text-[10px] text-amber-700">
-                    Notice will be marked active and automatically archived once the selected expiration period elapses.
-                  </p>
+                  {customExpiryDate && (
+                    <p className="text-[11px] text-amber-800 font-medium">
+                      Notice will remain active until {customExpiryDate} ({Math.max(1, Math.ceil((new Date(customExpiryDate + 'T23:59:59').getTime() - Date.now()) / 86400000))} days left).
+                    </p>
+                  )}
                 </div>
               )}
 
               {/* Document Attachment Upload */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
+                <label className="block font-bold text-slate-800 mb-1">
                   Attach Official Document (PDF or Image)
                 </label>
-                <input
-                  type="file"
-                  accept=".pdf,image/*"
-                  onChange={handleFileSelect}
-                  className="w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-rose-50 file:text-[#7B1113] hover:file:bg-rose-100"
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="file"
+                    accept=".pdf,image/*"
+                    onChange={handleFileSelect}
+                    className="w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-rose-50 file:text-[#7B1113] hover:file:bg-rose-100 cursor-pointer"
+                  />
+                  {circularForm.attachmentName && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCircularForm({ ...circularForm, attachmentUrl: '', attachmentName: '' })
+                      }
+                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100"
+                      title="Remove attached file"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
                 {circularForm.attachmentName && (
                   <p className="text-[10px] text-emerald-700 mt-1 font-medium flex items-center gap-1">
                     <CheckCircle2 className="w-3 h-3 text-emerald-600" />
@@ -860,17 +793,17 @@ export const NotificationsView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowCirculateModal(false)}
-                  className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                  className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSending}
-                  className="px-4 py-1.5 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm disabled:opacity-50 flex items-center gap-1.5"
+                  className="px-4 py-2 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-xl shadow-sm disabled:opacity-50 flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>{isSending ? 'Circulating...' : 'Dispatch Circular'}</span>
+                  <span>{isSending ? 'Circulating...' : 'Dispatch Official Circular'}</span>
                 </button>
               </div>
             </form>

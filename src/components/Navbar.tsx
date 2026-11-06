@@ -71,7 +71,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onSignInClick }) => {
     }
   };
 
-  const recentNotifications = (notifications || []).slice(0, 5);
+  const recentNotifications = (notifications || [])
+    .filter((n) => n.isSaved || !n.validUntil || new Date(n.validUntil).getTime() >= Date.now())
+    .slice(0, 5);
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">

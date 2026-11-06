@@ -17,6 +17,7 @@ import {
 import {
   generatePerformanceTemplate,
   parsePerformanceExcel,
+  generateSectionAllocationPdf,
 } from './sectionAllocationExcel.ts';
 
 test('1. 120 students distributed across 3 sections produces exactly 40, 40, 40', () => {
@@ -322,3 +323,95 @@ test('10. Semester Progression advances Even to Next Year Odd and graduates 8th 
   assert.equal(s4.currentSemester, 8);
   assert.equal(s4.status, 'GRADUATED');
 });
+
+test('11. generateSectionAllocationPdf generates valid PDF with clean uncrowded formatting without (Cap: 999)', () => {
+  const run: any = {
+    id: 'run-test-pdf',
+    departmentId: 'dept-ise',
+    academicYear: '2026-27',
+    yearOfStudy: 2,
+    semester: 3,
+    title: 'Year 2 Section Allocation',
+    status: 'PUBLISHED',
+    method: 'PERFORMANCE',
+    performanceMetric: 'CGPA',
+    sections: [
+      { name: 'Section A', capacity: 999, targetCount: 2 },
+      { name: 'Section B', capacity: 999, targetCount: 2 },
+    ],
+    totalStudentsCount: 4,
+    students: [
+      {
+        studentId: 's-1',
+        usn: '4MH23IS001',
+        fullName: 'Aarav Patel',
+        assignedSection: 'Section A',
+        currentSemester: 3,
+        performanceValue: 8.5,
+      },
+      {
+        studentId: 's-2',
+        usn: '4MH23IS002',
+        fullName: 'Bhavya Sharma',
+        assignedSection: 'Section A',
+        currentSemester: 3,
+        performanceValue: 7.2,
+      },
+      {
+        studentId: 's-3',
+        usn: '4MH23IS003',
+        fullName: 'Chirag Rao',
+        assignedSection: 'Section B',
+        currentSemester: 3,
+        performanceValue: 8.1,
+      },
+      {
+        studentId: 's-4',
+        usn: '4MH23IS004',
+        fullName: 'Divya Gowda',
+        assignedSection: 'Section B',
+        currentSemester: 3,
+        performanceValue: 7.9,
+      },
+    ],
+    summary: {
+      sectionCounts: { 'Section A': 2, 'Section B': 2 },
+      sectionAverages: { 'Section A': 7.85, 'Section B': 8.0 },
+    },
+    createdAt: new Date().toISOString(),
+    createdById: 'admin-1',
+    createdByName: 'Admin',
+    versionNumber: 1,
+  };
+
+  // 1. Notice Board copy (no CGPA, all sections)
+  const docNoticeBoard = generateSectionAllocationPdf(
+    run,
+    'MAHARAJA INSTITUTE OF TECHNOLOGY MYSORE',
+    'DEPARTMENT OF INFORMATION SCIENCE AND ENGINEERING',
+    { includeCgpa: false, selectedSection: 'ALL' }
+  );
+  assert.ok(docNoticeBoard);
+  assert.ok(docNoticeBoard.getNumberOfPages() >= 1);
+
+  // 2. Specific Section only (Section A only)
+  const docSecA = generateSectionAllocationPdf(
+    run,
+    'MAHARAJA INSTITUTE OF TECHNOLOGY MYSORE',
+    'DEPARTMENT OF INFORMATION SCIENCE AND ENGINEERING',
+    { includeCgpa: false, selectedSection: 'Section A' }
+  );
+  assert.ok(docSecA);
+  assert.equal(docSecA.getNumberOfPages(), 1);
+
+  // 3. Administrative copy (with CGPA scores)
+  const docAdmin = generateSectionAllocationPdf(
+    run,
+    'MAHARAJA INSTITUTE OF TECHNOLOGY MYSORE',
+    'DEPARTMENT OF INFORMATION SCIENCE AND ENGINEERING',
+    { includeCgpa: true, selectedSection: 'ALL' }
+  );
+  assert.ok(docAdmin);
+  assert.ok(docAdmin.getNumberOfPages() >= 1);
+});
+

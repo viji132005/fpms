@@ -351,6 +351,7 @@ export interface Notification {
   isRead: boolean;
   readByUserIds?: string[];
   savedByUserIds?: string[];
+  hiddenByUserIds?: string[];
   isSaved?: boolean;
   createdAt: string;
 }
