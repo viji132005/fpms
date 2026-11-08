@@ -15,7 +15,6 @@ import { FacultyPortfolioView } from './views/FacultyPortfolioView.tsx';
 import { DepartmentPortfolioView } from './views/DepartmentPortfolioView.tsx';
 import { MentorStudentsView } from './views/MentorStudentsView.tsx';
 import { AcademicFeedView } from './views/AcademicFeedView.tsx';
-import { AiReportView } from './views/AiReportView.tsx';
 import { NotificationsView } from './views/NotificationsView.tsx';
 import { InstitutionSettingsView } from './views/InstitutionSettingsView.tsx';
 import { AuditLogsView } from './views/AuditLogsView.tsx';
@@ -98,16 +97,12 @@ function MainApp() {
       case 'timetables':
         return <TimetableManagement />;
       case 'portfolio':
-        return <FacultyPortfolioView />;
       case 'department-portfolio':
-        return <DepartmentPortfolioView />;
+        return <FacultyPortfolioView />;
       case 'mentees':
         return <MentorStudentsView />;
       case 'feed':
         return <AcademicFeedView />;
-      case 'ai-report':
-      case 'reports':
-        return <AiReportView />;
       case 'notifications':
         return <NotificationsView />;
       case 'settings':

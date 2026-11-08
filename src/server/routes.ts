@@ -1408,6 +1408,15 @@ apiRouter.put(
     if (bio !== undefined) profile.bio = bio;
     if (profilePhotoUrl !== undefined) profile.profilePhotoUrl = profilePhotoUrl;
     if (cvUrl !== undefined) profile.cvUrl = cvUrl;
+    if (req.body.isProfileRegistered !== undefined) {
+      profile.isProfileRegistered = !!req.body.isProfileRegistered;
+    }
+    if (fullName && (isAdmin || !profile.fullName || req.body.isProfileRegistered)) {
+      profile.fullName = fullName.trim();
+    }
+    if (designation && (isAdmin || !profile.designation || req.body.isProfileRegistered)) {
+      profile.designation = designation.trim();
+    }
 
     // Admin-only fields
     if (isAdmin) {
@@ -3031,20 +3040,47 @@ apiRouter.get(
       (t) => t.departmentId === depId && t.status === 'PUBLISHED'
     );
 
+    // Active students in department to reflect current running semester per year
+    const activeStudents = (data.students || []).filter(
+      (s) => s.departmentId === depId && s.status === 'ACTIVE'
+    );
+
     // Build the latest committed snapshot for each academic year cohort (1st, 2nd, 3rd, 4th)
     const records = [1, 2, 3, 4].map((yr) => {
+      const yrStudents = activeStudents.filter((s) => s.currentYear === yr && s.currentSemester);
+      let activeSem = yr * 2 - 1;
+      if (yrStudents.length > 0) {
+        const semCounts: Record<number, number> = {};
+        yrStudents.forEach((s) => {
+          const sem = s.currentSemester || (yr * 2 - 1);
+          semCounts[sem] = (semCounts[sem] || 0) + 1;
+        });
+        const top = Object.entries(semCounts).sort((a, b) => b[1] - a[1])[0];
+        activeSem = top ? Number(top[0]) : yr * 2 - 1;
+      }
+      const activeSemOrdinal = getOrdinalSemester(activeSem); // e.g. "5th Semester"
+
+      // Filter published timetables for this year
       const yrTimetables = published.filter((t) => t.studentYear === yr);
       const yearLabel = yr === 1 ? '1st Year' : yr === 2 ? '2nd Year' : yr === 3 ? '3rd Year' : '4th Year';
 
-      if (yrTimetables.length > 0) {
+      // Match published timetables corresponding to active running cohort semester
+      const matchingSemTimetables = yrTimetables.filter((t) => {
+        const tSemNum = parseInt((t.semester || '').replace(/\D/g, ''), 10);
+        return tSemNum === activeSem || t.semester === activeSemOrdinal;
+      });
+
+      const timetablesToUse = matchingSemTimetables.length > 0 ? matchingSemTimetables : yrTimetables;
+
+      if (timetablesToUse.length > 0) {
         // Sort by publishedAt or updatedAt descending to pick latest committed session
-        yrTimetables.sort(
+        timetablesToUse.sort(
           (a, b) =>
             new Date(b.publishedAt || b.updatedAt).getTime() -
             new Date(a.publishedAt || a.updatedAt).getTime()
         );
-        const latest = yrTimetables[0];
-        const matchingBatch = yrTimetables.filter((t) => t.semester === latest.semester);
+        const latest = timetablesToUse[0];
+        const matchingBatch = timetablesToUse.filter((t) => t.semester === latest.semester);
         const sections = Array.from(new Set(matchingBatch.map((t) => t.section))).sort();
         const totalSlots = matchingBatch.reduce(
           (acc, t) => acc + (t.schedule?.filter((s) => s.courseCode).length || 0),
@@ -3069,11 +3105,11 @@ apiRouter.get(
         year: yr,
         yearLabel,
         hasCommitted: false,
-        semester: getOrdinalSemester(yr * 2 - 1),
+        semester: activeSemOrdinal,
         academicYear: data.institution.currentAcademicYear,
         committedAt: null,
         committedBy: null,
-        sections: [],
+        sections: yr === 3 ? ['Section A', 'Section B', 'Section C'] : ['Section A', 'Section B'],
         totalSlots: 0,
         timetables: [],
       };
@@ -3819,6 +3855,98 @@ apiRouter.post(
   }
 );
 
+apiRouter.get(
+  '/faculty/personal-schedule',
+  authMiddleware,
+  (req: AuthenticatedRequest, res: Response) => {
+    const data = db.getData();
+    if (!data.facultyPersonalSchedules) {
+      data.facultyPersonalSchedules = {};
+    }
+
+    const saved = data.facultyPersonalSchedules[req.user!.id];
+    if (saved) {
+      return res.json({ success: true, schedule: saved });
+    }
+
+    // Auto-derive from published department timetables as starting draft
+    const deptSlots = Array.isArray(data.structuredTimetables)
+      ? extractFacultyPersonalSchedule(data.structuredTimetables, req.user!.id)
+      : [];
+    const initialGrid: Record<string, any> = {};
+
+    deptSlots.forEach((slot) => {
+      const dayKey = slot.day.substring(0, 3).toUpperCase();
+      // Adjust standard period index to MITM periods
+      // slot.periodIndex is 0..6
+      // In MITM: 0 -> 0 (9-10), 1 -> 1 (10-11), 2 -> 3 (11.25-12.20), 3 -> 4 (12.20-1.15), 4 -> 6 (2-3), 5 -> 7 (3-4)
+      let pIdx = slot.periodIndex;
+      if (pIdx >= 2 && pIdx < 4) pIdx += 1;
+      else if (pIdx >= 4) pIdx += 2;
+
+      const key = `${dayKey}-${pIdx}`;
+      initialGrid[key] = {
+        subject: slot.courseCode ? `${slot.courseTitle || slot.courseCode}` : '',
+        year: slot.semester ? `${slot.semester} Sem (${slot.section || 'A'})` : '',
+        room: slot.room || '',
+      };
+    });
+
+    return res.json({
+      success: true,
+      schedule: {
+        grid: initialGrid,
+        updatedAt: null,
+        isAutoDerived: true,
+      },
+    });
+  }
+);
+
+apiRouter.put(
+  '/faculty/personal-schedule',
+  authMiddleware,
+  (req: AuthenticatedRequest, res: Response) => {
+    const { grid } = req.body;
+    if (!grid || typeof grid !== 'object') {
+      return res.status(400).json({ error: 'Timetable grid data is required.' });
+    }
+
+    const data = db.getData();
+    if (!data.facultyPersonalSchedules) {
+      data.facultyPersonalSchedules = {};
+    }
+
+    data.facultyPersonalSchedules[req.user!.id] = {
+      grid,
+      updatedAt: new Date().toISOString(),
+    };
+    db.save();
+
+    return res.json({
+      success: true,
+      message: 'Personal teaching schedule saved successfully!',
+      schedule: data.facultyPersonalSchedules[req.user!.id],
+    });
+  }
+);
+
+apiRouter.delete(
+  '/faculty/personal-schedule',
+  authMiddleware,
+  (req: AuthenticatedRequest, res: Response) => {
+    const data = db.getData();
+    if (data.facultyPersonalSchedules && data.facultyPersonalSchedules[req.user!.id]) {
+      data.facultyPersonalSchedules[req.user!.id] = {
+        grid: {},
+        updatedAt: new Date().toISOString(),
+      };
+      db.save();
+    }
+    return res.json({ success: true, message: 'Personal timetable records cleared.' });
+  }
+);
+
 apiRouter.delete(
   '/timetables/official/:id',
   authMiddleware,
@@ -3864,29 +3992,88 @@ apiRouter.get(
   (req: AuthenticatedRequest, res: Response) => {
     const data = db.getData();
     const currentUser = req.user!;
-    const { facultyUserId, departmentId, category } = req.query;
+    const { facultyUserId, departmentId, category, scope } = req.query;
 
     let items = [...data.portfolioItems];
 
-    if (currentUser.role === 'FACULTY') {
-      // Faculty can view their own, or public/department if authorized
+    if (scope === 'mine' && currentUser.role === 'FACULTY') {
       items = items.filter((p) => p.facultyUserId === currentUser.id);
-    } else if (currentUser.role === 'HOD' && currentUser.departmentId) {
-      // HOD views their department faculty
-      items = items.filter((p) => p.departmentId === currentUser.departmentId);
+    } else if (facultyUserId) {
+      items = items.filter((p) => p.facultyUserId === String(facultyUserId));
     } else if (departmentId) {
       items = items.filter((p) => p.departmentId === departmentId);
     }
+    // Note: Public repository view across department/institution!
 
-    if (facultyUserId) {
-      items = items.filter((p) => p.facultyUserId === facultyUserId);
-    }
-
-    if (category) {
+    if (category && category !== 'ALL') {
       items = items.filter((p) => p.category === category);
     }
 
     return res.json(items);
+  }
+);
+
+apiRouter.get(
+  '/portfolio/categories',
+  authMiddleware,
+  (req: AuthenticatedRequest, res: Response) => {
+    const data = db.getData();
+    const { facultyUserId } = req.query;
+    const targetUserId = (facultyUserId as string) || req.user!.id;
+
+    const defaultCategories = [
+      'Research Publications',
+      'Patents & Intellectual Property',
+      'Faculty Development Programs (FDP)',
+      'Workshops & Seminars',
+      'Conference Papers',
+      'Professional Certifications',
+      'Funded Research Projects',
+      'Honors & Awards',
+      'Book Chapters & Monographs',
+      'Consultancy & Industry Projects',
+    ];
+
+    if (!data.customPortfolioCategories) {
+      data.customPortfolioCategories = {};
+    }
+
+    const userCategories = data.customPortfolioCategories[targetUserId] || [];
+    const existingItemCats = data.portfolioItems
+      .filter((p) => p.facultyUserId === targetUserId)
+      .map((p) => p.category);
+
+    const merged = Array.from(new Set([...defaultCategories, ...userCategories, ...existingItemCats]));
+    return res.json(merged);
+  }
+);
+
+apiRouter.post(
+  '/portfolio/categories',
+  authMiddleware,
+  (req: AuthenticatedRequest, res: Response) => {
+    const { categoryName, facultyUserId } = req.body;
+    if (!categoryName || !categoryName.trim()) {
+      return res.status(400).json({ error: 'Category name is required.' });
+    }
+
+    const trimmed = categoryName.trim();
+    const data = db.getData();
+    if (!data.customPortfolioCategories) {
+      data.customPortfolioCategories = {};
+    }
+
+    const targetUserId = facultyUserId || req.user!.id;
+    if (!data.customPortfolioCategories[targetUserId]) {
+      data.customPortfolioCategories[targetUserId] = [];
+    }
+
+    if (!data.customPortfolioCategories[targetUserId].includes(trimmed)) {
+      data.customPortfolioCategories[targetUserId].push(trimmed);
+      db.save();
+    }
+
+    return res.json({ success: true, category: trimmed, categories: data.customPortfolioCategories[targetUserId] });
   }
 );
 
@@ -4537,14 +4724,36 @@ apiRouter.delete(
   (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
     const data = db.getData();
-    const idx = data.feedPosts.findIndex(
-      (p) => p.id === id && (p.authorUserId === req.user!.id || req.user!.role === 'ADMIN')
-    );
-    if (idx === -1) {
-      return res.status(404).json({ error: 'Post not found or unauthorized.' });
+    const post = data.feedPosts.find((p) => p.id === id);
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found.' });
     }
+
+    const isAuthor = post.authorUserId === req.user!.id;
+    const isAdmin =
+      req.user!.role === 'ADMIN' ||
+      (req.user as any)?.role === 'SUPER_ADMIN' ||
+      (req.user as any)?.role === 'MASTER_ADMIN';
+
+    if (!isAuthor && !isAdmin) {
+      return res.status(403).json({
+        error: 'Permission denied: Only the author of this post or an Administrator can delete it.',
+      });
+    }
+
+    const idx = data.feedPosts.findIndex((p) => p.id === id);
     data.feedPosts.splice(idx, 1);
     db.save();
+
+    logAudit(
+      { id: req.user!.id, email: req.user!.email, role: req.user!.role },
+      'DELETE_FEED_POST',
+      'FEED_POST',
+      id,
+      `Removed post "${post.title}" (Author: ${post.authorName}).`,
+      req
+    );
+
     return res.json({ success: true, message: 'Post removed successfully.' });
   }
 );

@@ -8,8 +8,6 @@ import {
   Calendar,
   X,
   Upload,
-  Globe,
-  Lock,
   Trash2,
   ChevronLeft,
   ChevronRight,
@@ -335,7 +333,7 @@ export const AcademicFeedView: React.FC = () => {
             <span>Institutional Academic Feed & Photo Gallery</span>
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Department events, research milestones, conferences, and student achievements with customizable post duration and clear Public vs Internal campus visibility.
+            Department events, research milestones, conferences, and student achievements with customizable post duration and multi-photo gallery.
           </p>
         </div>
 
@@ -391,10 +389,13 @@ export const AcademicFeedView: React.FC = () => {
                 ? [post.mediaUrl]
                 : [];
             const slideIdx = activeSlide[post.id] || 0;
-            const canManage =
-              user?.id === post.authorUserId ||
+            const isAuthor = user?.id === post.authorUserId;
+            const isAdmin =
               user?.role === 'ADMIN' ||
-              user?.role === 'HOD';
+              (user as any)?.role === 'SUPER_ADMIN' ||
+              (user as any)?.role === 'MASTER_ADMIN';
+            const canDelete = isAuthor || isAdmin;
+            const canEdit = isAuthor || isAdmin;
 
             return (
               <div
@@ -434,19 +435,6 @@ export const AcademicFeedView: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {/* Visibility Badge */}
-                    {post.visibility === 'PUBLIC' ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                        <Globe className="w-3 h-3" />
-                        <span>Public</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                        <Lock className="w-3 h-3" />
-                        <span>Internal Campus</span>
-                      </span>
-                    )}
-
                     {(post as any).isPinned && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
                         <Pin className="w-3 h-3" />
@@ -456,22 +444,26 @@ export const AcademicFeedView: React.FC = () => {
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
                       {post.category.replace(/_/g, ' ')}
                     </span>
-                    {canManage && (
+                    {(canEdit || canDelete) && (
                       <div className="flex items-center gap-1 ml-1 border-l pl-2 border-slate-200">
-                        <button
-                          onClick={() => handleOpenEdit(post)}
-                          className="p-1 text-slate-400 hover:text-[#7B1113] rounded transition-colors"
-                          title="Edit Post"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteTarget({ id: post.id, title: post.title })}
-                          className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
-                          title="Delete Post"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {canEdit && (
+                          <button
+                            onClick={() => handleOpenEdit(post)}
+                            className="p-1 text-slate-400 hover:text-[#7B1113] rounded transition-colors"
+                            title="Edit Post"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            onClick={() => setDeleteTarget({ id: post.id, title: post.title })}
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
+                            title="Delete Post"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -527,12 +519,7 @@ export const AcademicFeedView: React.FC = () => {
                 </div>
 
                 {/* Post Footer */}
-                <div className="px-4 py-2.5 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                  <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#7B1113]"></span>
-                    <span>Institutional Communication</span>
-                  </div>
-
+                <div className="px-4 py-2.5 bg-slate-50/70 border-t border-slate-100 flex items-center justify-end text-xs text-slate-500">
                   <div className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
                     <Calendar className="w-3.5 h-3.5 text-slate-400" />
                     <span>Event Date: {post.eventDate}</span>

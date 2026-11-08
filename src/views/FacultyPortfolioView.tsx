@@ -1,8 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { PortfolioItem } from '../types/index.ts';
+import { PortfolioItem, StaffProfile } from '../types/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { authFetch } from '../utils/api.ts';
 import {
+  Folder,
+  FolderOpen,
+  FolderPlus,
   FolderGit2,
   Plus,
   Search,
@@ -12,18 +15,40 @@ import {
   Download,
   Eye,
   X,
-  FileSpreadsheet,
-  CheckCircle2,
   User,
+  ArrowLeft,
+  Mail,
+  Phone,
+  GraduationCap,
+  Briefcase,
   AlertCircle,
+  ExternalLink,
+  ChevronRight,
+  BookOpen,
 } from 'lucide-react';
 
 export const FacultyPortfolioView: React.FC = () => {
-  const { user } = useAuth();
-  const [items, setItems] = useState<PortfolioItem[]>([]);
-  const [activeCategory, setActiveCategory] = useState<string>('ALL');
+  const { user, profile, department } = useAuth();
+  const deptId = department?.id || 'dept-ise';
+
+  // Navigation state
+  // null = root directory of faculty dossiers
+  // string = selected facultyUserId
+  const [selectedFacultyId, setSelectedFacultyId] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [search, setSearch] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Data state
+  const [allFaculty, setAllFaculty] = useState<StaffProfile[]>([]);
+  const [allItems, setAllItems] = useState<PortfolioItem[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+
+  // Modals state
+  const [showAddRecordModal, setShowAddRecordModal] = useState<boolean>(false);
+  const [showNewCategoryModal, setShowNewCategoryModal] = useState<boolean>(false);
+  const [newCategoryName, setNewCategoryName] = useState<string>('');
+  const [isSubmittingCategory, setIsSubmittingCategory] = useState<boolean>(false);
 
   // File upload state for Add Modal
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -38,14 +63,13 @@ export const FacultyPortfolioView: React.FC = () => {
     category: string;
   } | null>(null);
 
-  // In-app Delete Confirmation (no window.confirm)
+  // In-app Delete Confirmation
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
-  // Add Record Modal
-  const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  // Add Record Form State
   const [formData, setFormData] = useState({
-    category: 'PUBLICATION',
+    category: 'Research Publications',
     title: '',
     academicYear: '2026-27',
     eventDate: new Date().toISOString().split('T')[0],
@@ -54,36 +78,105 @@ export const FacultyPortfolioView: React.FC = () => {
     evidenceDocName: '',
   });
 
-  const categories = [
-    { id: 'ALL', label: 'All Records' },
-    { id: 'PUBLICATION', label: 'Publications' },
-    { id: 'PATENT', label: 'Patents' },
-    { id: 'FDP', label: 'FDPs' },
-    { id: 'WORKSHOP', label: 'Workshops' },
-    { id: 'CONFERENCE', label: 'Conferences' },
-    { id: 'SEMINAR', label: 'Seminars' },
-    { id: 'CERTIFICATION', label: 'Certifications' },
-    { id: 'AWARD', label: 'Awards' },
+  // Default suggested categories
+  const suggestedCategories = [
+    'Research Publications',
+    'Patents & Intellectual Property',
+    'Faculty Development Programs (FDP)',
+    'Workshops & Seminars',
+    'Conference Papers',
+    'Professional Certifications',
+    'Funded Research Projects',
+    'Book Chapters & Monographs',
+    'Consultancy & Industry Projects',
+    'Honors & Awards',
   ];
 
-  const fetchItems = () => {
+  // Load all faculty profiles and portfolio items
+  const loadData = async () => {
     setIsLoading(true);
-    let url = '/api/portfolio?';
-    if (activeCategory !== 'ALL') url += `category=${activeCategory}&`;
+    try {
+      const [staffRes, portfolioRes] = await Promise.all([
+        authFetch('/api/staff?type=teaching'),
+        authFetch('/api/portfolio'), // Public institutional repository
+      ]);
 
-    authFetch(url)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data) => {
-        if (Array.isArray(data)) setItems(data);
-      })
-      .catch((err) => console.error('Error fetching portfolio items:', err))
-      .finally(() => setIsLoading(false));
+      const staffData = staffRes.ok ? await staffRes.json() : [];
+      const portfolioData = portfolioRes.ok ? await portfolioRes.json() : [];
+
+      if (Array.isArray(staffData)) setAllFaculty(staffData);
+      if (Array.isArray(portfolioData)) setAllItems(portfolioData);
+    } catch (err) {
+      console.error('Error loading portfolio directory:', err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchItems();
-  }, [activeCategory]);
+    loadData();
+  }, []);
 
+  // Fetch categories for the active faculty
+  useEffect(() => {
+    const targetUserId = selectedFacultyId || user?.id;
+    if (targetUserId) {
+      authFetch(`/api/portfolio/categories?facultyUserId=${encodeURIComponent(targetUserId)}`)
+        .then((res) => (res.ok ? res.json() : suggestedCategories))
+        .then((cats) => {
+          if (Array.isArray(cats)) {
+            // Merge with any categories already present in items
+            const itemCats = allItems.map((p) => p.category);
+            const merged = Array.from(new Set([...cats, ...itemCats]));
+            setCategories(merged);
+          }
+        })
+        .catch(() => setCategories(suggestedCategories));
+    }
+  }, [selectedFacultyId, user, allItems]);
+
+  // Order faculty list so the current user's folder is FIRST
+  const sortedFacultyList = React.useMemo(() => {
+    if (!allFaculty || allFaculty.length === 0) return [];
+    const currentUserId = user?.id;
+
+    const myProfile = allFaculty.find((f) => f.userId === currentUserId);
+    const others = allFaculty.filter((f) => f.userId !== currentUserId);
+
+    // Sort others alphabetically by full name
+    others.sort((a, b) => a.fullName.localeCompare(b.fullName));
+
+    return myProfile ? [myProfile, ...others] : others;
+  }, [allFaculty, user]);
+
+  // Selected faculty profile
+  const currentFaculty = allFaculty.find((f) => f.userId === selectedFacultyId) || null;
+  const isViewingOwnFolder = selectedFacultyId === user?.id;
+  const canManageFolder = isViewingOwnFolder || user?.role === 'ADMIN' || user?.role === 'HOD';
+
+  // Filter items for the selected faculty (or all if at root)
+  const displayedItems = React.useMemo(() => {
+    let list = allItems;
+    if (selectedFacultyId) {
+      list = list.filter((item) => item.facultyUserId === selectedFacultyId);
+    }
+    if (selectedCategory !== 'ALL') {
+      list = list.filter((item) => item.category === selectedCategory);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (item) =>
+          item.title.toLowerCase().includes(q) ||
+          item.category.toLowerCase().includes(q) ||
+          (item.facultyName && item.facultyName.toLowerCase().includes(q)) ||
+          JSON.stringify(item.details || {}).toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [allItems, selectedFacultyId, selectedCategory, search]);
+
+  // File upload handler
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     setFileError('');
@@ -112,18 +205,9 @@ export const FacultyPortfolioView: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleRemoveAttachedFile = () => {
-    setFormData((prev) => ({
-      ...prev,
-      evidenceDocUrl: '',
-      evidenceDocName: '',
-    }));
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
   const handleCreateRecord = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title) return;
+    if (!formData.title.trim()) return;
 
     try {
       const res = await authFetch('/api/portfolio', {
@@ -132,9 +216,9 @@ export const FacultyPortfolioView: React.FC = () => {
         body: JSON.stringify(formData),
       });
       if (res.ok) {
-        setShowAddModal(false);
+        setShowAddRecordModal(false);
         setFormData({
-          category: 'PUBLICATION',
+          category: categories[0] || 'Research Publications',
           title: '',
           academicYear: '2026-27',
           eventDate: new Date().toISOString().split('T')[0],
@@ -143,10 +227,41 @@ export const FacultyPortfolioView: React.FC = () => {
           evidenceDocName: '',
         });
         if (fileInputRef.current) fileInputRef.current.value = '';
-        fetchItems();
+        loadData();
       }
     } catch (err) {
       console.error('Error creating portfolio record:', err);
+    }
+  };
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCategoryName.trim()) return;
+
+    setIsSubmittingCategory(true);
+    try {
+      const res = await authFetch('/api/portfolio/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          categoryName: newCategoryName.trim(),
+          facultyUserId: selectedFacultyId || user?.id,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.category && !categories.includes(data.category)) {
+          setCategories((prev) => [...prev, data.category]);
+        }
+        setFormData((prev) => ({ ...prev, category: newCategoryName.trim() }));
+        setSelectedCategory(newCategoryName.trim());
+        setNewCategoryName('');
+        setShowNewCategoryModal(false);
+      }
+    } catch (err) {
+      console.error('Error adding category:', err);
+    } finally {
+      setIsSubmittingCategory(false);
     }
   };
 
@@ -157,7 +272,7 @@ export const FacultyPortfolioView: React.FC = () => {
       const res = await authFetch(`/api/portfolio/${deleteTarget.id}`, { method: 'DELETE' });
       if (res.ok) {
         setDeleteTarget(null);
-        fetchItems();
+        loadData();
       }
     } catch (err) {
       console.error('Error deleting portfolio item:', err);
@@ -166,284 +281,589 @@ export const FacultyPortfolioView: React.FC = () => {
     }
   };
 
-  const handleDownloadEvidence = (url: string, fileName: string) => {
+  const handleDownloadDoc = (url: string, fileName: string) => {
     const a = document.createElement('a');
     a.href = url;
-    a.download = fileName || 'portfolio_evidence_document.pdf';
+    a.download = fileName || 'portfolio_document.pdf';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   };
 
-  const handleExportCsv = () => {
-    if (filteredItems.length === 0) return;
-    const headers = ['Sl. No.', 'Category', 'Title', 'Faculty Name', 'Academic Year', 'Date', 'Details', 'Evidence File'];
-    const rows = filteredItems.map((item, idx) => [
-      idx + 1,
-      `"${item.category}"`,
-      `"${item.title.replace(/"/g, '""')}"`,
-      `"${(item.facultyName || '').replace(/"/g, '""')}"`,
-      `"${item.academicYear}"`,
-      `"${item.eventDate}"`,
-      `"${JSON.stringify(item.details).replace(/"/g, '""')}"`,
-      `"${item.evidenceDocName || (item.evidenceDocUrl ? 'Attached' : 'None')}"`,
-    ]);
-
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `mit_ise_faculty_portfolio_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const filteredItems = items.filter((item) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      item.title.toLowerCase().includes(q) ||
-      item.category.toLowerCase().includes(q) ||
-      (item.facultyName && item.facultyName.toLowerCase().includes(q)) ||
-      JSON.stringify(item.details).toLowerCase().includes(q)
-    );
-  });
-
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Top Header & Breadcrumbs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-            Academic Portfolio & Evidence Management
+          <div className="flex items-center gap-2 text-xs text-slate-500 font-semibold mb-1">
+            <span
+              onClick={() => {
+                setSelectedFacultyId(null);
+                setSelectedCategory('ALL');
+              }}
+              className="text-slate-600 hover:text-[#7B1113] cursor-pointer"
+            >
+              Academic Repository
+            </span>
+            {currentFaculty && (
+              <>
+                <span>/</span>
+                <span className="text-[#7B1113] font-bold">{currentFaculty.fullName}</span>
+                {selectedCategory !== 'ALL' && (
+                  <>
+                    <span>/</span>
+                    <span className="text-slate-700">{selectedCategory}</span>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <FolderGit2 className="w-5 h-5 text-[#7B1113]" />
+            <span>Institutional Academic Portfolio & Research Repository</span>
           </h1>
-          <p className="text-xs text-slate-500 mt-1">
-            Department of Information Science & Engineering · Maharaja Institute of Technology, Mysore
+          <p className="text-xs text-slate-500 mt-0.5">
+            Public academic repository · Open institutional access to faculty research, publications, patents, and certifications.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          {filteredItems.length > 0 && (
+        {/* Global Action / Search */}
+        <div className="flex items-center gap-3 self-start sm:self-auto">
+          {selectedFacultyId && (
             <button
-              onClick={handleExportCsv}
-              className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-sm flex items-center gap-1.5 transition-colors"
-              title="Export roster for NAAC / NBA Criterion audit"
+              onClick={() => {
+                setSelectedFacultyId(null);
+                setSelectedCategory('ALL');
+              }}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-              <span>Export CSV</span>
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>All Faculty Folders</span>
             </button>
           )}
 
-          <button
-            onClick={() => {
-              setFileError('');
-              setShowAddModal(true);
-            }}
-            className="px-4 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm flex items-center gap-1.5 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Academic Contribution</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Categories Segmented Control & Search */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        {/* Category Tabs */}
-        <div className="flex items-center gap-1 p-1 bg-slate-200/80 rounded-lg overflow-x-auto">
-          {categories.map((cat) => (
+          {canManageFolder && selectedFacultyId && (
             <button
-              key={cat.id}
-              onClick={() => setActiveCategory(cat.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-                activeCategory === cat.id
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => {
+                setFileError('');
+                setShowAddRecordModal(true);
+              }}
+              className="px-4 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              {cat.label}
+              <Plus className="w-4 h-4" />
+              <span>Add Academic Contribution</span>
             </button>
-          ))}
-        </div>
-
-        {/* Search */}
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-          <input
-            type="text"
-            placeholder="Search title, DOI, or faculty..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg w-full sm:w-64 focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-          />
+          )}
         </div>
       </div>
 
-      {/* Items List */}
-      <div className="space-y-3">
-        {isLoading ? (
-          <div className="py-12 text-center text-xs text-slate-400">Loading portfolio contributions...</div>
-        ) : filteredItems.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-xs text-slate-500">
-            <FolderGit2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-            <p className="font-semibold text-slate-700">No records found for this category.</p>
-            <p className="text-slate-400 mt-1">
-              Click &ldquo;Add Academic Contribution&rdquo; above to log publications, patents, workshops, or FDP certificates with genuine documentary evidence.
-            </p>
+      {/* VIEW 1: ROOT DIRECTORY - ALL FACULTY FOLDERS */}
+      {!selectedFacultyId && (
+        <div className="space-y-6">
+          {/* Search Bar & Stats */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+            <div className="text-xs text-slate-600">
+              Showing <strong>{sortedFacultyList.length} Faculty Dossier Folders</strong> in Department
+            </div>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                placeholder="Search faculty name or title..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg w-full sm:w-72 focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+              />
+            </div>
           </div>
-        ) : (
-          filteredItems.map((item, idx) => (
-            <div
-              key={item.id}
-              className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:border-slate-300 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
-            >
-              <div className="flex items-start gap-3.5 max-w-3xl">
-                {/* Sl. No. badge */}
-                <div className="shrink-0 w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-xs text-slate-600">
-                  {idx + 1}
-                </div>
 
-                <div className="space-y-1.5">
-                  {/* Clean unboxed metadata discipline */}
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                    <span className="font-bold text-[#7B1113]">{item.category}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>AY {item.academicYear}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{item.eventDate}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="font-semibold text-emerald-700 flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" />
-                      {item.status || 'VERIFIED'}
-                    </span>
-                    {(user?.role === 'ADMIN' || user?.role === 'HOD') && item.facultyName && (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span className="font-medium text-slate-700 flex items-center gap-1">
-                          <User className="w-3 h-3 text-slate-400" />
-                          {item.facultyName}
+          {/* Grid of Faculty Folders */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {sortedFacultyList
+              .filter((fac) => {
+                if (!search) return true;
+                const q = search.toLowerCase();
+                return (
+                  fac.fullName.toLowerCase().includes(q) ||
+                  fac.designation.toLowerCase().includes(q) ||
+                  fac.specialization.toLowerCase().includes(q)
+                );
+              })
+              .map((fac, idx) => {
+                const isCurrentUser = fac.userId === user?.id;
+                const facItems = allItems.filter((item) => item.facultyUserId === fac.userId);
+
+                return (
+                  <div
+                    key={fac.userId}
+                    onClick={() => {
+                      setSelectedFacultyId(fac.userId);
+                      setSelectedCategory('ALL');
+                    }}
+                    className={`rounded-2xl p-5 border shadow-sm transition-all cursor-pointer relative group flex flex-col justify-between ${
+                      isCurrentUser
+                        ? 'bg-gradient-to-br from-rose-50/70 via-white to-amber-50/30 border-[#7B1113] ring-2 ring-[#7B1113]/10 hover:shadow-md'
+                        : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md'
+                    }`}
+                  >
+                    <div>
+                      {/* Top folder badge / tag */}
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm ${
+                              isCurrentUser
+                                ? 'bg-[#7B1113] text-white shadow-sm'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            <Folder className="w-4.5 h-4.5" />
+                          </div>
+                          <div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              Faculty Dossier
+                            </div>
+                            <div className="text-xs font-bold text-slate-900 group-hover:text-[#7B1113] transition-colors">
+                              {fac.fullName}
+                            </div>
+                          </div>
+                        </div>
+
+                        {isCurrentUser && (
+                          <span className="text-[10px] font-bold text-[#7B1113] bg-rose-100/80 px-2 py-0.5 rounded-full border border-rose-200">
+                            Your Folder
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Faculty Details */}
+                      <div className="text-xs text-slate-600 space-y-1 mb-4">
+                        <div className="font-semibold text-slate-800">{fac.designation}</div>
+                        <div className="text-[11px] text-slate-500">{fac.qualification}</div>
+                        {fac.specialization && (
+                          <div className="text-[11px] text-slate-500 truncate">
+                            Specialization: {fac.specialization}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Footer Counts & Action */}
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <div className="font-bold text-[#7B1113] flex items-center gap-1.5">
+                        <span className="text-sm font-extrabold tabular-nums">{facItems.length}</span>
+                        <span className="text-[11px] font-medium text-slate-500">
+                          {facItems.length === 1 ? 'Record' : 'Records'}
                         </span>
-                      </>
-                    )}
+                      </div>
+                      <div className="text-xs font-semibold text-slate-600 group-hover:text-[#7B1113] flex items-center gap-1">
+                        <span>Open Folder</span>
+                        <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+                      </div>
+                    </div>
                   </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
 
-                  <h3 className="text-sm font-bold text-slate-900 leading-snug">
-                    {item.title}
-                  </h3>
-
-                  {/* Category-specific details preview */}
-                  <div className="text-xs text-slate-600 space-y-0.5 pt-0.5">
-                    {item.category === 'PUBLICATION' && (
-                      <p>
-                        <span className="font-semibold text-slate-700">Journal/Conference:</span>{' '}
-                        {item.details.journal || 'Peer Reviewed'} ·{' '}
-                        <span className="font-semibold text-slate-700">Indexing:</span>{' '}
-                        {item.details.indexing || 'Verified'} ·{' '}
-                        <span className="font-semibold text-slate-700">DOI:</span>{' '}
-                        {item.details.doi || 'N/A'}
-                      </p>
-                    )}
-                    {item.category === 'PATENT' && (
-                      <p>
-                        <span className="font-semibold text-slate-700">App No:</span>{' '}
-                        {item.details.applicationNumber || 'N/A'} ·{' '}
-                        <span className="font-semibold text-slate-700">Jurisdiction:</span>{' '}
-                        {item.details.jurisdiction || 'Indian Patent Office'} ·{' '}
-                        <span className="font-semibold text-slate-700">Status:</span>{' '}
-                        {item.details.status || 'Filed'}
-                      </p>
-                    )}
-                    {(item.category === 'FDP' || item.category === 'WORKSHOP' || item.category === 'CONFERENCE' || item.category === 'SEMINAR') && (
-                      <p>
-                        <span className="font-semibold text-slate-700">Organizer:</span>{' '}
-                        {item.details.organizer || 'Academic Body'} ·{' '}
-                        <span className="font-semibold text-slate-700">Duration:</span>{' '}
-                        {item.details.durationDays ? `${item.details.durationDays} Days` : 'Completed'} ·{' '}
-                        <span className="font-semibold text-slate-700">Mode:</span>{' '}
-                        {item.details.mode || 'In-Person'}
-                      </p>
-                    )}
-                    {item.category === 'AWARD' && (
-                      <p>
-                        <span className="font-semibold text-slate-700">Conferring Organization:</span>{' '}
-                        {item.details.awardedBy || 'Institutional Council'}
-                      </p>
-                    )}
-                    {item.category === 'CERTIFICATION' && (
-                      <p>
-                        <span className="font-semibold text-slate-700">Issuing Authority:</span>{' '}
-                        {item.details.issuer || 'Professional Body'} ·{' '}
-                        <span className="font-semibold text-slate-700">Score/Grade:</span>{' '}
-                        {item.details.grade || 'Elite / Completed'}
-                      </p>
-                    )}
+      {/* VIEW 2: INSIDE A SELECTED FACULTY'S FOLDER */}
+      {selectedFacultyId && currentFaculty && (
+        <div className="space-y-6">
+          {/* Faculty Header Card */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full ring-4 ring-slate-100 overflow-hidden bg-slate-800 flex items-center justify-center shrink-0">
+                {currentFaculty.profilePhotoUrl ? (
+                  <img
+                    src={currentFaculty.profilePhotoUrl}
+                    alt={currentFaculty.fullName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-amber-500 to-rose-600 flex items-center justify-center text-white text-2xl font-bold">
+                    {currentFaculty.fullName.charAt(0).toUpperCase()}
                   </div>
-                </div>
+                )}
               </div>
 
-              {/* Actions & Evidence */}
-              <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
-                {item.evidenceDocUrl ? (
-                  <>
-                    <button
-                      onClick={() =>
-                        setPreviewDoc({
-                          url: item.evidenceDocUrl!,
-                          name: item.evidenceDocName || `${item.category.toLowerCase()}_certificate.pdf`,
-                          title: item.title,
-                          category: item.category,
-                        })
-                      }
-                      className="px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1.5 transition-colors"
-                      title="Inspect attached certificate or documentary evidence"
-                    >
-                      <Eye className="w-3.5 h-3.5 text-[#7B1113]" />
-                      <span>View Evidence</span>
-                    </button>
-                    <button
-                      onClick={() =>
-                        handleDownloadEvidence(
-                          item.evidenceDocUrl!,
-                          item.evidenceDocName || `${item.category.toLowerCase()}_evidence.pdf`
-                        )
-                      }
-                      className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
-                      title="Download Attached Document"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                    </button>
-                  </>
-                ) : (
-                  <span className="text-[11px] text-slate-400 italic">No document attached</span>
-                )}
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-lg font-bold text-slate-900">{currentFaculty.fullName}</h2>
+                  {isViewingOwnFolder && (
+                    <span className="text-[10px] font-bold text-[#7B1113] bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                      You (Owner)
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs font-semibold text-slate-700 mt-0.5">
+                  {currentFaculty.designation} · {currentFaculty.qualification}
+                </p>
+                <p className="text-xs text-slate-500 mt-1 max-w-xl">
+                  {currentFaculty.bio || 'Department teaching faculty and research contributor.'}
+                </p>
 
-                {(user?.role === 'ADMIN' || user?.role === 'HOD' || item.facultyUserId === user?.id) && (
-                  <button
-                    onClick={() => setDeleteTarget({ id: item.id, title: item.title })}
-                    className="p-1.5 text-slate-400 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors ml-1"
-                    title="Delete Record"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
+                <div className="flex items-center gap-4 text-xs text-slate-500 mt-2 flex-wrap">
+                  {((currentFaculty as any).user?.email || (currentFaculty as any).email) && (
+                    <span className="flex items-center gap-1">
+                      <Mail className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{(currentFaculty as any).user?.email || (currentFaculty as any).email}</span>
+                    </span>
+                  )}
+                  {currentFaculty.phone && (
+                    <span className="flex items-center gap-1">
+                      <Phone className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{currentFaculty.phone}</span>
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
-          ))
-        )}
-      </div>
 
-      {/* Add Record Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-lg w-full p-6 max-h-[92vh] overflow-y-auto">
+            {/* Quick Actions (Add record or View CV) */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+              {currentFaculty.cvUrl && (
+                <button
+                  onClick={() =>
+                    setPreviewDoc({
+                      url: currentFaculty.cvUrl!,
+                      name: `${currentFaculty.fullName.replace(/\s+/g, '_')}_CV.pdf`,
+                      title: `${currentFaculty.fullName} - Curriculum Vitae`,
+                      category: 'Curriculum Vitae',
+                    })
+                  }
+                  className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5 text-[#7B1113]" />
+                  <span>View CV</span>
+                </button>
+              )}
+
+              {canManageFolder && (
+                <button
+                  onClick={() => setShowNewCategoryModal(true)}
+                  className="px-3.5 py-2 text-xs font-semibold text-[#7B1113] bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  <span>+ New Category Folder</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Category Folders Bar (Custom Folders) */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+              <span className="uppercase tracking-wider">Academic Category Folders</span>
+              <span className="text-slate-400 font-normal">
+                Click any folder to filter documents
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              {/* All Folder */}
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('ALL')}
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                  selectedCategory === 'ALL'
+                    ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-sm'
+                    : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <FolderOpen className="w-4 h-4" />
+                  <span className="text-xs font-mono font-bold tabular-nums">
+                    {allItems.filter((p) => p.facultyUserId === selectedFacultyId).length}
+                  </span>
+                </div>
+                <div className="text-xs font-bold truncate">All Categories</div>
+                <div
+                  className={`text-[10px] truncate ${
+                    selectedCategory === 'ALL' ? 'text-rose-100' : 'text-slate-400'
+                  }`}
+                >
+                  Complete Dossier
+                </div>
+              </button>
+
+              {/* Dynamic Category Folders */}
+              {categories.map((cat) => {
+                const count = allItems.filter(
+                  (p) => p.facultyUserId === selectedFacultyId && p.category === cat
+                ).length;
+                const isSelected = selectedCategory === cat;
+
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-sm'
+                        : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <Folder className="w-4 h-4" />
+                      <span className="text-xs font-mono font-bold tabular-nums">{count}</span>
+                    </div>
+                    <div className="text-xs font-bold truncate" title={cat}>
+                      {cat}
+                    </div>
+                    <div
+                      className={`text-[10px] truncate ${
+                        isSelected ? 'text-rose-100' : 'text-slate-400'
+                      }`}
+                    >
+                      {count === 1 ? '1 Document' : `${count} Documents`}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Documents / Contributions List in Selected Category */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <h3 className="text-sm font-bold text-slate-900">
+                {selectedCategory === 'ALL' ? 'All Academic Documents' : selectedCategory} (
+                {displayedItems.length})
+              </h3>
+
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Filter records..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg w-full sm:w-60 focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                />
+              </div>
+            </div>
+
+            {displayedItems.length === 0 ? (
+              <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-xs text-slate-500">
+                <Folder className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="font-semibold text-slate-700">No documents in this folder yet.</p>
+                <p className="text-slate-400 mt-1">
+                  {canManageFolder
+                    ? 'Click "+ Add Academic Contribution" above to upload certificates, published papers, or grant proofs.'
+                    : 'This faculty member has not uploaded documents into this folder yet.'}
+                </p>
+              </div>
+            ) : (
+              displayedItems.map((item, idx) => (
+                <div
+                  key={item.id}
+                  className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:border-slate-300 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
+                >
+                  <div className="flex items-start gap-3.5 max-w-3xl">
+                    {/* Index */}
+                    <div className="shrink-0 w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-xs text-slate-600">
+                      {idx + 1}
+                    </div>
+
+                    <div className="space-y-1">
+                      {/* Clean metadata without pill borders or 'Verified' status */}
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span className="font-bold text-[#7B1113]">{item.category}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>AY {item.academicYear}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{item.eventDate}</span>
+                      </div>
+
+                      <h4 className="text-sm font-bold text-slate-900 leading-snug">{item.title}</h4>
+
+                      {/* Details row */}
+                      {item.details && Object.keys(item.details).length > 0 && (
+                        <div className="text-xs text-slate-600 pt-0.5 space-x-2">
+                          {item.details.journal && (
+                            <span>
+                              <strong>Journal:</strong> {item.details.journal}
+                            </span>
+                          )}
+                          {item.details.doi && (
+                            <span>
+                              <strong>DOI:</strong> {item.details.doi}
+                            </span>
+                          )}
+                          {item.details.applicationNumber && (
+                            <span>
+                              <strong>App No:</strong> {item.details.applicationNumber}
+                            </span>
+                          )}
+                          {item.details.organizer && (
+                            <span>
+                              <strong>Organizer:</strong> {item.details.organizer}
+                            </span>
+                          )}
+                          {item.details.issuer && (
+                            <span>
+                              <strong>Issuer:</strong> {item.details.issuer}
+                            </span>
+                          )}
+                          {item.details.authors && (
+                            <span>
+                              <strong>Co-Authors:</strong> {item.details.authors}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions: View replaces View Evidence, Download, Delete */}
+                  <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                    {item.evidenceDocUrl ? (
+                      <>
+                        <button
+                          onClick={() =>
+                            setPreviewDoc({
+                              url: item.evidenceDocUrl!,
+                              name: item.evidenceDocName || `${item.category.toLowerCase()}_file.pdf`,
+                              title: item.title,
+                              category: item.category,
+                            })
+                          }
+                          className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="View attached document"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-[#7B1113]" />
+                          <span>View</span>
+                        </button>
+                        <button
+                          onClick={() =>
+                            handleDownloadDoc(
+                              item.evidenceDocUrl!,
+                              item.evidenceDocName || `${item.category.toLowerCase()}_file.pdf`
+                            )
+                          }
+                          className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                          title="Download Document"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-slate-400 italic">No document attached</span>
+                    )}
+
+                    {(user?.role === 'ADMIN' ||
+                      user?.role === 'HOD' ||
+                      item.facultyUserId === user?.id) && (
+                      <button
+                        onClick={() => setDeleteTarget({ id: item.id, title: item.title })}
+                        className="p-1.5 text-slate-400 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors ml-1 cursor-pointer"
+                        title="Delete Record"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1: Create Custom Category Folder */}
+      {showNewCategoryModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 animate-in fade-in-50">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-              <div>
-                <h2 className="text-sm font-bold text-slate-900">Add Academic Contribution</h2>
-                <p className="text-[11px] text-slate-500">Record research, certifications, or FDP participation</p>
+              <div className="flex items-center gap-2">
+                <FolderPlus className="w-5 h-5 text-[#7B1113]" />
+                <h3 className="text-sm font-bold text-slate-900">Create New Category Folder</h3>
               </div>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => setShowNewCategoryModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCategory} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Folder Category Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g. Consultancy Projects, Book Chapters, Keynotes"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                />
+              </div>
+
+              {/* Suggestions */}
+              <div>
+                <span className="text-[11px] font-semibold text-slate-500 mb-1.5 block">
+                  Or pick a suggested institutional category:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    'Book Chapters',
+                    'Sponsored Research',
+                    'Consultancy Projects',
+                    'Keynote Lectures',
+                    'Student Mentored Projects',
+                    'Hackathon Mentorship',
+                  ].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setNewCategoryName(s)}
+                      className="px-2 py-1 text-[11px] bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-[#7B1113] rounded-lg border border-slate-200 cursor-pointer"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewCategoryModal(false)}
+                  className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingCategory || !newCategoryName.trim()}
+                  className="px-4 py-1.5 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {isSubmittingCategory ? 'Creating...' : 'Create Folder'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: Add Academic Contribution */}
+      {showAddRecordModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 max-h-[92vh] overflow-y-auto animate-in fade-in-50">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Add Academic Contribution</h3>
+                <p className="text-[11px] text-slate-500">Upload documents and research evidence into your folder</p>
+              </div>
+              <button
+                onClick={() => setShowAddRecordModal(false)}
                 className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
               >
                 <X className="w-4 h-4" />
@@ -453,223 +873,119 @@ export const FacultyPortfolioView: React.FC = () => {
             <form onSubmit={handleCreateRecord} className="space-y-3.5 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Category</label>
+                  <label className="block font-bold text-slate-700 mb-1">Category Folder *</label>
                   <select
                     value={formData.category}
                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-medium"
                   >
-                    <option value="PUBLICATION">Research Publication</option>
-                    <option value="PATENT">Intellectual Property / Patent</option>
-                    <option value="FDP">Faculty Development Program (FDP)</option>
-                    <option value="WORKSHOP">Workshop</option>
-                    <option value="CONFERENCE">Conference Paper</option>
-                    <option value="SEMINAR">Seminar</option>
-                    <option value="CERTIFICATION">Professional Certification</option>
-                    <option value="AWARD">Honors & Awards</option>
+                    {categories.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Date</label>
+                  <label className="block font-bold text-slate-700 mb-1">Date *</label>
                   <input
                     type="date"
                     required
                     value={formData.eventDate}
                     onChange={(e) => setFormData({ ...formData, eventDate: e.target.value })}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Title / Contribution Name</label>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Title / Contribution Name *
+                </label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Distributed Consensus in Cloud-Edge Environments"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full px-3 py-1.5 border border-slate-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Academic Year</label>
+                  <label className="block font-bold text-slate-700 mb-1">Academic Year</label>
                   <select
                     value={formData.academicYear}
                     onChange={(e) => setFormData({ ...formData, academicYear: e.target.value })}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white"
                   >
                     <option value="2026-27">2026-27 (Current)</option>
                     <option value="2025-26">2025-26</option>
                     <option value="2024-25">2024-25</option>
                   </select>
                 </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Journal / Organization / Issuer</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. IEEE / Springer / VTU / NPTEL"
+                    value={formData.details.journal || formData.details.organizer || ''}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        details: {
+                          ...formData.details,
+                          journal: e.target.value,
+                          organizer: e.target.value,
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl"
+                  />
+                </div>
               </div>
 
-              {/* Dynamic Category Fields */}
-              {formData.category === 'PUBLICATION' && (
-                <div className="space-y-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                  <div className="font-semibold text-slate-800">Publication Details</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      placeholder="Journal/Conference Name"
-                      value={formData.details.journal || ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          details: { ...formData.details, journal: e.target.value },
-                        })
-                      }
-                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Indexing (e.g. Scopus, Web of Science)"
-                      value={formData.details.indexing || ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          details: { ...formData.details, indexing: e.target.value },
-                        })
-                      }
-                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      placeholder="DOI / Paper URL"
-                      value={formData.details.doi || ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          details: { ...formData.details, doi: e.target.value },
-                        })
-                      }
-                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Co-authors (if any)"
-                      value={formData.details.authors || ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          details: { ...formData.details, authors: e.target.value },
-                        })
-                      }
-                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded"
-                    />
-                  </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">DOI / Paper URL / App No.</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 10.1109/ACCESS.2026..."
+                    value={formData.details.doi || ''}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        details: { ...formData.details, doi: e.target.value },
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl"
+                  />
                 </div>
-              )}
 
-              {formData.category === 'PATENT' && (
-                <div className="space-y-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                  <div className="font-semibold text-slate-800">Patent Details</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      placeholder="Application Number"
-                      value={formData.details.applicationNumber || ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          details: { ...formData.details, applicationNumber: e.target.value },
-                        })
-                      }
-                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded"
-                    />
-                    <select
-                      value={formData.details.status || 'Filed'}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          details: { ...formData.details, status: e.target.value },
-                        })
-                      }
-                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded"
-                    >
-                      <option value="Filed">Filed</option>
-                      <option value="Published">Published</option>
-                      <option value="Granted">Granted</option>
-                    </select>
-                  </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Co-Authors / Collaborators</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Dr. Sharath Kumar, Prof. Ganavi"
+                    value={formData.details.authors || ''}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        details: { ...formData.details, authors: e.target.value },
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl"
+                  />
                 </div>
-              )}
+              </div>
 
-              {(formData.category === 'FDP' || formData.category === 'WORKSHOP' || formData.category === 'CONFERENCE' || formData.category === 'SEMINAR') && (
-                <div className="space-y-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                  <div className="font-semibold text-slate-800">Program Details</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      placeholder="Organizer / Host Institution"
-                      value={formData.details.organizer || ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          details: { ...formData.details, organizer: e.target.value },
-                        })
-                      }
-                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Duration (in Days)"
-                      value={formData.details.durationDays || ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          details: { ...formData.details, durationDays: Number(e.target.value) },
-                        })
-                      }
-                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {formData.category === 'CERTIFICATION' && (
-                <div className="space-y-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                  <div className="font-semibold text-slate-800">Certification Details</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      placeholder="Issuing Organization (e.g. NPTEL, AWS)"
-                      value={formData.details.issuer || ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          details: { ...formData.details, issuer: e.target.value },
-                        })
-                      }
-                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Score / Grade / Level"
-                      value={formData.details.grade || ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          details: { ...formData.details, grade: e.target.value },
-                        })
-                      }
-                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Genuine Documentary Evidence File Upload */}
+              {/* Documentary Evidence Upload */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Supporting Certificate / Evidence Document (PDF or Image, max 15MB)
+                <label className="block font-bold text-slate-700 mb-1">
+                  Supporting Document / Certificate (PDF or Image, max 15MB)
                 </label>
 
                 <input
@@ -691,7 +1007,7 @@ export const FacultyPortfolioView: React.FC = () => {
                       Click to upload certificate or scan
                     </span>
                     <span className="text-[11px] text-slate-500 mt-0.5">
-                      Accepts scanned certificates, signed approvals, or published papers (.pdf, .jpg, .png)
+                      Accepts scanned certificates, signed approvals, or papers (.pdf, .jpg, .png)
                     </span>
                   </label>
                 ) : (
@@ -707,7 +1023,14 @@ export const FacultyPortfolioView: React.FC = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={handleRemoveAttachedFile}
+                      onClick={() => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          evidenceDocUrl: '',
+                          evidenceDocName: '',
+                        }));
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }}
                       className="p-1 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
                       title="Remove document"
                     >
@@ -724,20 +1047,20 @@ export const FacultyPortfolioView: React.FC = () => {
                 )}
               </div>
 
-              <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2">
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                  onClick={() => setShowAddRecordModal(false)}
+                  className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isProcessingFile}
-                  className="px-4 py-1.5 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm disabled:opacity-50"
+                  className="px-4 py-1.5 text-xs font-bold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm disabled:opacity-50 cursor-pointer"
                 >
-                  {isProcessingFile ? 'Processing...' : 'Save to Portfolio'}
+                  {isProcessingFile ? 'Processing...' : 'Upload to Portfolio'}
                 </button>
               </div>
             </form>
@@ -745,10 +1068,10 @@ export const FacultyPortfolioView: React.FC = () => {
         </div>
       )}
 
-      {/* In-App Document Preview Modal */}
+      {/* MODAL 3: In-App Document Preview Modal */}
       {previewDoc && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in-50">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in-50">
             {/* Modal Header */}
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
               <div className="truncate pr-4">
@@ -757,20 +1080,20 @@ export const FacultyPortfolioView: React.FC = () => {
                   <span>·</span>
                   <span className="truncate">{previewDoc.name}</span>
                 </div>
-                <h2 className="text-sm font-bold text-white truncate mt-0.5">{previewDoc.title}</h2>
+                <h3 className="text-sm font-bold text-white truncate mt-0.5">{previewDoc.title}</h3>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
                 <button
-                  onClick={() => handleDownloadEvidence(previewDoc.url, previewDoc.name)}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-900 bg-white hover:bg-slate-100 rounded-lg flex items-center gap-1.5 transition-colors"
+                  onClick={() => handleDownloadDoc(previewDoc.url, previewDoc.name)}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-900 bg-white hover:bg-slate-100 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Download</span>
                 </button>
                 <button
                   onClick={() => setPreviewDoc(null)}
-                  className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors"
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -802,8 +1125,8 @@ export const FacultyPortfolioView: React.FC = () => {
                   <p className="font-bold text-slate-800">{previewDoc.name}</p>
                   <p className="text-xs text-slate-500 mt-1">This document format is ready for local inspection.</p>
                   <button
-                    onClick={() => handleDownloadEvidence(previewDoc.url, previewDoc.name)}
-                    className="mt-4 px-4 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg inline-flex items-center gap-2"
+                    onClick={() => handleDownloadDoc(previewDoc.url, previewDoc.name)}
+                    className="mt-4 px-4 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg inline-flex items-center gap-2 cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
                     <span>Download Document</span>
@@ -814,10 +1137,11 @@ export const FacultyPortfolioView: React.FC = () => {
           </div>
         </div>
       )}
-      {/* In-app Delete Confirmation Modal */}
+
+      {/* MODAL 4: Delete Confirmation Modal */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-sm w-full p-5 text-center">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-sm w-full p-5 text-center">
             <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
               <Trash2 className="w-6 h-6" />
             </div>
@@ -831,7 +1155,7 @@ export const FacultyPortfolioView: React.FC = () => {
                 type="button"
                 disabled={isDeleting}
                 onClick={() => setDeleteTarget(null)}
-                className="px-3.5 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg"
+                className="px-3.5 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
               >
                 Cancel
               </button>
@@ -839,7 +1163,7 @@ export const FacultyPortfolioView: React.FC = () => {
                 type="button"
                 disabled={isDeleting}
                 onClick={confirmDeleteRecord}
-                className="px-4 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm disabled:opacity-50"
+                className="px-4 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm disabled:opacity-50 cursor-pointer"
               >
                 {isDeleting ? 'Deleting...' : 'Yes, Delete Record'}
               </button>

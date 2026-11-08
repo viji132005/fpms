@@ -20,6 +20,7 @@ import {
   MITM_PERIOD_DEFINITIONS,
   validateCrossSectionClashes,
 } from '../utils/timetableMultiSection.ts';
+import { FacultyPersonalTimetableGrid } from '../components/FacultyPersonalTimetableGrid.tsx';
 import {
   CalendarDays,
   Calendar,
@@ -149,7 +150,7 @@ export const TimetableManagement: React.FC = () => {
   });
 
   // Interactive Stamp Mode: selected subject code or '__ERASER__'
-  const [activeStampCode, setActiveStampCode] = useState<string | null>('M23BIS601');
+  const [activeStampCode, setActiveStampCode] = useState<string | null>(null);
 
   // Slot custom override drawer
   const [editingSlot, setEditingSlot] = useState<{
@@ -164,13 +165,16 @@ export const TimetableManagement: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [crossSectionConflicts, setCrossSectionConflicts] = useState<string[]>([]);
 
-  // Update semester list when year changes
-  const allowedSemesters = getSemestersForYear(selectedYear);
+  // Auto-sync semester when year or studentSemestersByYear updates
   useEffect(() => {
-    if (!allowedSemesters.includes(selectedSemester)) {
-      setSelectedSemester(allowedSemesters[0]);
+    const targetSem = studentSemestersByYear[selectedYear] || cohortInfoByYear[selectedYear]?.semester || (selectedYear * 2 - 1);
+    const allowed = getSemestersForYear(selectedYear);
+    if (allowed.includes(targetSem)) {
+      setSelectedSemester(targetSem);
+    } else {
+      setSelectedSemester(allowed[0]);
     }
-  }, [selectedYear]);
+  }, [selectedYear, studentSemestersByYear]);
 
   // Section names based on numberOfSections
   const sectionList = ['Section A', 'Section B', 'Section C', 'Section D'].slice(0, numberOfSections);
@@ -195,8 +199,11 @@ export const TimetableManagement: React.FC = () => {
       .then((data) => {
         if (Array.isArray(data)) {
           setSubjects(data);
-          if (data.length > 0 && !activeStampCode) {
-            setActiveStampCode(data[0].code);
+          if (data.length > 0) {
+            const hasExisting = activeStampCode && data.some((s) => s.code === activeStampCode);
+            if (!hasExisting) {
+              setActiveStampCode(data[0].code);
+            }
           }
         }
       })
@@ -367,12 +374,10 @@ export const TimetableManagement: React.FC = () => {
           if (studentSecs.length > 0) {
             sections = studentSecs.sort();
           }
-        } else if (yrRecord) {
-          const recSem = parseInt((yrRecord.semester || '').replace(/\D/g, ''), 10);
-          if (!isNaN(recSem) && recSem > 0) {
-            semester = recSem;
-          }
-          if (yrRecord.sections && yrRecord.sections.length > 0) {
+        } else {
+          // If no active students in this cohort yet, strictly reflect default cycle (Year 1: 1, Year 2: 3, Year 3: 5, Year 4: 7)
+          semester = yr * 2 - 1;
+          if (yrRecord && yrRecord.sections && yrRecord.sections.length > 0) {
             sections = yrRecord.sections;
           }
         }
@@ -401,12 +406,15 @@ export const TimetableManagement: React.FC = () => {
 
   const handleSelectYear = (yr: number) => {
     setSelectedYear(yr);
+    const targetSem = studentSemestersByYear[yr] || cohortInfoByYear[yr]?.semester || (yr * 2 - 1);
+    const allowed = getSemestersForYear(yr);
+    const semToSet = allowed.includes(targetSem) ? targetSem : allowed[0];
+    setSelectedSemester(semToSet);
+
     const cohort = cohortInfoByYear[yr] || {
-      semester: studentSemestersByYear[yr] || (yr * 2 - 1),
+      semester: semToSet,
       sections: yr === 3 ? ['Section A', 'Section B', 'Section C'] : ['Section A', 'Section B'],
     };
-    const targetSem = studentSemestersByYear[yr] || cohort.semester || (yr * 2 - 1);
-    setSelectedSemester(targetSem);
     setNumberOfSections(Math.max(1, Math.min(4, cohort.sections.length)));
     if (officialPreviewSection !== 'ALL' && !cohort.sections.includes(officialPreviewSection)) {
       setOfficialPreviewSection('ALL');
@@ -1170,7 +1178,7 @@ export const TimetableManagement: React.FC = () => {
               }`}
             >
               <Clock className="w-3.5 h-3.5" />
-              <span>My Teaching Schedule ({facultySchedule.length} Slots)</span>
+              <span>My Teaching Schedule</span>
             </button>
             <button
               onClick={() => setFacultyActiveTab('dept-timetable')}
@@ -2092,39 +2100,7 @@ export const TimetableManagement: React.FC = () => {
       {/* FACULTY PORTAL TIMETABLE VIEW */}
       {/* ============================================================== */}
       {isFaculty && facultyActiveTab === 'my-schedule' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 print:hidden">
-          <h2 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <Clock className="w-4 h-4 text-[#7B1113]" />
-            <span>Authorized Weekly Teaching Schedule for {user?.email}</span>
-          </h2>
-
-          {facultySchedule.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-400">
-              No published classes currently scheduled for your account.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {facultySchedule.map((s, idx) => (
-                <div
-                  key={idx}
-                  className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1"
-                >
-                  <div className="flex items-center justify-between text-xs font-bold">
-                    <span className="text-[#7B1113]">{s.day}</span>
-                    <span className="text-slate-500 font-mono text-[10px]">{s.timeRange}</span>
-                  </div>
-                  <div className="text-xs font-extrabold text-slate-900 truncate">
-                    {s.courseTitle} ({s.courseCode})
-                  </div>
-                  <div className="text-[11px] text-slate-500 flex items-center justify-between">
-                    <span>{s.semester} · {s.section}</span>
-                    <span className="font-mono text-slate-700 font-semibold">{s.room}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <FacultyPersonalTimetableGrid />
       )}
 
       {/* ============================================================== */}

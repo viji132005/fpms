@@ -24,6 +24,7 @@ export interface StaffProfile {
   profilePhotoUrl?: string;
   cvUrl?: string;
   activityCount?: number;
+  isProfileRegistered?: boolean;
   completeness?: {
     score: number;
     completedFields: string[];
@@ -235,15 +236,7 @@ export interface PortfolioItem {
   facultyUserId: string;
   facultyName: string;
   departmentId: string;
-  category:
-    | 'PUBLICATION'
-    | 'PATENT'
-    | 'FDP'
-    | 'WORKSHOP'
-    | 'CONFERENCE'
-    | 'SEMINAR'
-    | 'CERTIFICATION'
-    | 'AWARD';
+  category: string;
   title: string;
   academicYear: string;
   eventDate: string;
@@ -442,5 +435,19 @@ export interface StudentSectionAllocationRun {
   publishedById?: string;
   publishedByName?: string;
   versionNumber: number;
+}
+
+export interface FacultyPersonalGridCell {
+  subject: string; // e.g. "FSD"
+  year?: string; // e.g. "2nd Year", "3rd Year", "4th Year"
+  room?: string; // e.g. "LH-201"
+  batch?: string; // e.g. "B1"
+  notes?: string;
+}
+
+export interface FacultyPersonalSchedule {
+  facultyUserId: string;
+  grid: Record<string, FacultyPersonalGridCell>; // key: `${day}-${periodIndex}`, e.g. "MON-0"
+  updatedAt?: string;
 }
 

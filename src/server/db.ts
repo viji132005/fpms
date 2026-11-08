@@ -33,6 +33,7 @@ export interface StaffProfile {
   bio: string;
   profilePhotoUrl?: string;
   cvUrl?: string;
+  isProfileRegistered?: boolean;
 }
 
 export interface Department {
@@ -413,6 +414,8 @@ export interface DatabaseSchema {
   academicSubjects: AcademicSubject[];
   subjectAllocations: SubjectAllocationRecord[];
   sectionAllocationRuns: StudentSectionAllocationRun[];
+  facultyPersonalSchedules?: Record<string, { grid: Record<string, any>; updatedAt: string }>;
+  customPortfolioCategories?: Record<string, string[]>;
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');

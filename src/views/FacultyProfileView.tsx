@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
-import { calculateProfileCompleteness } from '../utils/completeness.ts';
 import { authFetch } from '../utils/api.ts';
 import {
   UserCircle,
@@ -42,11 +41,6 @@ export const FacultyProfileView: React.FC = () => {
     return <div className="p-8 text-xs text-slate-500">Loading faculty profile...</div>;
   }
 
-  const completeness = calculateProfileCompleteness({
-    ...formData,
-    activityCount: profile.activityCount || 1,
-  });
-
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -85,11 +79,11 @@ export const FacultyProfileView: React.FC = () => {
       const res = await authFetch(`/api/staff/${user.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, isProfileRegistered: true }),
       });
       if (res.ok) {
         setSuccessMessage('Profile and documents updated successfully!');
-        refreshAuth();
+        await refreshAuth();
       } else {
         const err = await res.json();
         setErrorMessage(err.error || 'Failed to update profile.');
@@ -113,50 +107,7 @@ export const FacultyProfileView: React.FC = () => {
             Complete your profile photo, official curriculum vitae, and academic qualifications.
           </p>
         </div>
-
-        <div className="flex items-center gap-2 self-start">
-          <span className="font-mono text-xs font-bold text-[#7B1113] bg-rose-50 px-2.5 py-1 rounded border border-rose-200">
-            {profile.staffId}
-          </span>
-        </div>
       </div>
-
-      {/* Completeness Bar */}
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <UserCircle className="w-5 h-5 text-[#7B1113]" />
-            <h2 className="text-xs font-bold text-slate-900">Profile Completeness Status</h2>
-          </div>
-          <span className="text-base font-bold font-mono text-[#7B1113] tabular-nums">
-            {completeness.score}%
-          </span>
-        </div>
-
-        <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-          <div
-            className="bg-[#7B1113] h-2.5 rounded-full transition-all duration-500"
-            style={{ width: `${completeness.score}%` }}
-          />
-        </div>
-
-        {completeness.missingFields.length > 0 ? (
-          <div className="text-[11px] text-amber-800 bg-amber-50 p-2.5 rounded-lg border border-amber-200 flex items-center justify-between">
-            <div>
-              <strong>Pending for 100% completion:</strong> {completeness.missingFields.join(', ')}
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-200 text-amber-900 px-2 py-0.5 rounded">
-              Action Required
-            </span>
-          </div>
-        ) : (
-          <div className="text-[11px] text-emerald-800 bg-emerald-50 p-2.5 rounded-lg border border-emerald-200 flex items-center gap-1.5 font-semibold">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>Profile is 100% complete and fully verified for institutional appraisal.</span>
-          </div>
-        )}
-      </div>
-
       {successMessage && (
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-medium text-emerald-800 flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -245,42 +196,28 @@ export const FacultyProfileView: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Official Designation</label>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Official Designation
+              </label>
               <input
                 type="text"
-                required
+                disabled
                 value={formData.designation}
-                onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                className="w-full px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-100 text-slate-600 font-medium cursor-not-allowed"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Contact Phone</label>
-              <input
-                type="tel"
-                required
-                placeholder="9880011223"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Academic Qualifications
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Ph.D, M.Tech in Computer Science"
-                value={formData.qualification}
-                onChange={(e) => setFormData({ ...formData, qualification: e.target.value })}
-                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-              />
-            </div>
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">
+              Academic Qualifications
+            </label>
+            <input
+              type="text"
+              disabled
+              value={formData.qualification}
+              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-100 text-slate-600 font-medium cursor-not-allowed"
+            />
           </div>
 
           <div>

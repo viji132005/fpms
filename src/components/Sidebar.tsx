@@ -44,6 +44,7 @@ export const Sidebar: React.FC = () => {
       { id: 'students', label: 'Student Management', icon: <GraduationCap className="w-4 h-4" /> },
       { id: 'section-allocation', label: 'Section Allocation', icon: <SplitSquareVertical className="w-4 h-4" /> },
       { id: 'mentor-allocation', label: 'Mentor Allocation', icon: <Network className="w-4 h-4" /> },
+      { id: 'portfolio', label: 'Academic Portfolio', icon: <FolderGit2 className="w-4 h-4" /> },
       { id: 'timetables', label: 'Timetable Management', icon: <CalendarDays className="w-4 h-4" /> },
       { id: 'feed', label: 'Institutional Feed', icon: <Rss className="w-4 h-4" /> },
       { id: 'notifications', label: 'Notifications & Circulars', icon: <Bell className="w-4 h-4" />, badge: unreadCount },
@@ -55,7 +56,7 @@ export const Sidebar: React.FC = () => {
       { id: 'staff', label: 'Department Faculty', icon: <Users className="w-4 h-4" /> },
       { id: 'students', label: 'Student Management', icon: <GraduationCap className="w-4 h-4" /> },
       { id: 'section-allocation', label: 'Section Allocation', icon: <SplitSquareVertical className="w-4 h-4" /> },
-      { id: 'department-portfolio', label: 'Department Portfolio', icon: <FolderGit2 className="w-4 h-4" /> },
+      { id: 'portfolio', label: 'Academic Portfolio', icon: <FolderGit2 className="w-4 h-4" /> },
       { id: 'timetables', label: 'Timetable', icon: <CalendarDays className="w-4 h-4" /> },
       { id: 'feed', label: 'Academic Feed', icon: <Rss className="w-4 h-4" /> },
       { id: 'notifications', label: 'Notifications & Circulars', icon: <Bell className="w-4 h-4" />, badge: unreadCount },
@@ -64,6 +65,7 @@ export const Sidebar: React.FC = () => {
   } else if (user.role === 'NON_TEACHING') {
     items = [
       { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+      { id: 'portfolio', label: 'Academic Portfolio', icon: <FolderGit2 className="w-4 h-4" /> },
       { id: 'timetables', label: 'Lab & Timetable', icon: <CalendarDays className="w-4 h-4" /> },
       { id: 'feed', label: 'Academic Feed', icon: <Rss className="w-4 h-4" /> },
       { id: 'notifications', label: 'Notifications & Circulars', icon: <Bell className="w-4 h-4" />, badge: unreadCount },
@@ -78,7 +80,6 @@ export const Sidebar: React.FC = () => {
       { id: 'mentees', label: 'Mentor Students', icon: <Network className="w-4 h-4" /> },
       { id: 'timetables', label: 'Timetable', icon: <CalendarDays className="w-4 h-4" /> },
       { id: 'feed', label: 'Academic Feed', icon: <Rss className="w-4 h-4" /> },
-      { id: 'ai-report', label: 'AI Report Assistant', icon: <Sparkles className="w-4 h-4" /> },
       { id: 'notifications', label: 'Notifications & Circulars', icon: <Bell className="w-4 h-4" />, badge: unreadCount },
       { id: 'security', label: 'Account & Security', icon: <KeyRound className="w-4 h-4" /> },
     ];
