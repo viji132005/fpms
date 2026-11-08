@@ -249,7 +249,7 @@ export function executeRandomBalancedAllocation(
 export function executePerformanceBalancedAllocation(
   students: CandidateStudentInput[],
   sections: SectionConfig[],
-  metric: 'CGPA' | 'SGPA',
+  metric: 'CGPA' | 'SGPA' | 'CGPA/SGPA' | string,
   bands: SectionAllocationBand[] = DEFAULT_PERFORMANCE_BANDS,
   seed?: string,
   missingPolicy: 'UNASSIGNED' | 'DISTRIBUTE_EVENLY' = 'UNASSIGNED'

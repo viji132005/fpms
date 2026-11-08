@@ -175,6 +175,10 @@ export const StudentManagement: React.FC = () => {
 
   const handleOpenAddModal = () => {
     const defaultYr = typeof activeTab === 'number' ? activeTab : 1;
+    const currentSem =
+      deptYearStats[defaultYr]?.activeSem ||
+      (currentDeptCycle === 'EVEN' ? defaultYr * 2 : defaultYr * 2 - 1);
+
     setNewStudent({
       usn: '',
       fullName: '',
@@ -183,7 +187,7 @@ export const StudentManagement: React.FC = () => {
       parentPhone: '',
       departmentId: deptId,
       currentYear: defaultYr,
-      currentSemester: defaultYr * 2 - 1,
+      currentSemester: currentSem,
       section: 'Section A',
       admissionCohort:
         defaultYr === 1 ? '2025' : defaultYr === 2 ? '2024' : defaultYr === 3 ? '2023' : '2022',
@@ -325,6 +329,12 @@ export const StudentManagement: React.FC = () => {
       const result = await res.json();
       setImportResult(result);
       if (result.success) {
+        setShowImportModal(false);
+        setImportRows([]);
+        setImportFileName('');
+        setCascadeSuccessMsg(
+          result.message || `Successfully committed import of ${result.importedCount} student(s)!`
+        );
         fetchStudents();
         fetchDeptStats();
       }
@@ -978,81 +988,33 @@ export const StudentManagement: React.FC = () => {
             )}
 
             <form onSubmit={handleAddStudent} className="space-y-3.5 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+              {/* Auto-selected Cohort Context */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    University Seat Number (USN)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newStudent.usn}
-                    onChange={(e) =>
-                      setNewStudent({ ...newStudent, usn: e.target.value.toUpperCase() })
-                    }
-                    placeholder="4MH24IS001"
-                    className="w-full px-3 py-1.5 font-mono uppercase border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  />
+                  <span className="text-[10px] text-slate-500 uppercase font-bold block">Target Cohort</span>
+                  <span className="text-xs font-bold text-slate-900">
+                    Year {newStudent.currentYear} · Semester {newStudent.currentSemester}
+                  </span>
                 </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Section</label>
-                  <select
-                    value={newStudent.section}
-                    onChange={(e) =>
-                      setNewStudent({ ...newStudent, section: e.target.value })
-                    }
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  >
-                    <option value="Section A">Section A</option>
-                    <option value="Section B">Section B</option>
-                    <option value="Section C">Section C</option>
-                    <option value="Section D">Section D</option>
-                  </select>
-                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#7B1113]/10 text-[#7B1113] border border-[#7B1113]/20">
+                  {deptCode} Dept
+                </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Academic Year</label>
-                  <select
-                    value={newStudent.currentYear}
-                    onChange={(e) => {
-                      const yr = Number(e.target.value);
-                      setNewStudent({
-                        ...newStudent,
-                        currentYear: yr,
-                        currentSemester: yr * 2 - 1,
-                      });
-                    }}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  >
-                    <option value={1}>1st Year</option>
-                    <option value={2}>2nd Year</option>
-                    <option value={3}>3rd Year</option>
-                    <option value={4}>4th Year</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Semester</label>
-                  <select
-                    value={newStudent.currentSemester}
-                    onChange={(e) => {
-                      const sem = Number(e.target.value);
-                      setNewStudent({
-                        ...newStudent,
-                        currentSemester: sem,
-                        currentYear: Math.ceil(sem / 2),
-                      });
-                    }}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
-                      <option key={s} value={s}>
-                        Sem {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  University Seat Number (USN)
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newStudent.usn}
+                  onChange={(e) =>
+                    setNewStudent({ ...newStudent, usn: e.target.value.toUpperCase() })
+                  }
+                  placeholder={`4MH${newStudent.currentYear === 1 ? '25' : newStudent.currentYear === 2 ? '24' : newStudent.currentYear === 3 ? '23' : '22'}${deptCode}001`}
+                  className="w-full px-3 py-1.5 font-mono uppercase border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                />
               </div>
 
               <div>

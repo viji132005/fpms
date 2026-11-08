@@ -169,3 +169,61 @@ test('calculateCombinedMultiYearAllocation distributes 2nd, 3rd, and 4th year co
   assert.equal(result.groups[0].students.length, 6);
   assert.equal(result.groups[1].students.length, 6);
 });
+
+test('calculateCombinedMultiYearAllocation in RANDOM mode distributes each year cohort equally across mentors', () => {
+  const students: StudentRecord[] = [
+    // 6 students from 2nd year
+    { id: 's2-1', usn: '4MH25IS001', fullName: '2nd Year 1', departmentId: 'dept-ise', currentYear: 2, status: 'ACTIVE' },
+    { id: 's2-2', usn: '4MH25IS002', fullName: '2nd Year 2', departmentId: 'dept-ise', currentYear: 2, status: 'ACTIVE' },
+    { id: 's2-3', usn: '4MH25IS003', fullName: '2nd Year 3', departmentId: 'dept-ise', currentYear: 2, status: 'ACTIVE' },
+    { id: 's2-4', usn: '4MH25IS004', fullName: '2nd Year 4', departmentId: 'dept-ise', currentYear: 2, status: 'ACTIVE' },
+    { id: 's2-5', usn: '4MH25IS005', fullName: '2nd Year 5', departmentId: 'dept-ise', currentYear: 2, status: 'ACTIVE' },
+    { id: 's2-6', usn: '4MH25IS006', fullName: '2nd Year 6', departmentId: 'dept-ise', currentYear: 2, status: 'ACTIVE' },
+    // 6 students from 3rd year
+    { id: 's3-1', usn: '4MH24IS001', fullName: '3rd Year 1', departmentId: 'dept-ise', currentYear: 3, status: 'ACTIVE' },
+    { id: 's3-2', usn: '4MH24IS002', fullName: '3rd Year 2', departmentId: 'dept-ise', currentYear: 3, status: 'ACTIVE' },
+    { id: 's3-3', usn: '4MH24IS003', fullName: '3rd Year 3', departmentId: 'dept-ise', currentYear: 3, status: 'ACTIVE' },
+    { id: 's3-4', usn: '4MH24IS004', fullName: '3rd Year 4', departmentId: 'dept-ise', currentYear: 3, status: 'ACTIVE' },
+    { id: 's3-5', usn: '4MH24IS005', fullName: '3rd Year 5', departmentId: 'dept-ise', currentYear: 3, status: 'ACTIVE' },
+    { id: 's3-6', usn: '4MH24IS006', fullName: '3rd Year 6', departmentId: 'dept-ise', currentYear: 3, status: 'ACTIVE' },
+    // 6 students from 4th year
+    { id: 's4-1', usn: '4MH23IS001', fullName: '4th Year 1', departmentId: 'dept-ise', currentYear: 4, status: 'ACTIVE' },
+    { id: 's4-2', usn: '4MH23IS002', fullName: '4th Year 2', departmentId: 'dept-ise', currentYear: 4, status: 'ACTIVE' },
+    { id: 's4-3', usn: '4MH23IS003', fullName: '4th Year 3', departmentId: 'dept-ise', currentYear: 4, status: 'ACTIVE' },
+    { id: 's4-4', usn: '4MH23IS004', fullName: '4th Year 4', departmentId: 'dept-ise', currentYear: 4, status: 'ACTIVE' },
+    { id: 's4-5', usn: '4MH23IS005', fullName: '4th Year 5', departmentId: 'dept-ise', currentYear: 4, status: 'ACTIVE' },
+    { id: 's4-6', usn: '4MH23IS006', fullName: '4th Year 6', departmentId: 'dept-ise', currentYear: 4, status: 'ACTIVE' },
+  ];
+
+  const mentors: MentorFacultyRecord[] = [
+    { id: 'm1', staffId: 'ISE01', fullName: 'Mentor Alpha', departmentId: 'dept-ise', isMentorEligible: true, status: 'ACTIVE' },
+    { id: 'm2', staffId: 'ISE02', fullName: 'Mentor Beta', departmentId: 'dept-ise', isMentorEligible: true, status: 'ACTIVE' },
+    { id: 'm3', staffId: 'ISE03', fullName: 'Mentor Gamma', departmentId: 'dept-ise', isMentorEligible: true, status: 'ACTIVE' },
+  ];
+
+  const result = calculateCombinedMultiYearAllocation(
+    students,
+    mentors,
+    'dept-ise',
+    '2026-27',
+    [2, 3, 4],
+    'RANDOM',
+    'test-seed-12345'
+  );
+
+  assert.equal(result.totalStudentsAllocated, 18);
+  assert.equal(result.allocationMode, 'RANDOM');
+  assert.equal(result.groups.length, 3);
+
+  // Each mentor must receive exactly 2 students from 2nd year, 2 from 3rd year, and 2 from 4th year = 6 total
+  for (const group of result.groups) {
+    assert.equal(group.students.length, 6);
+    const y2Count = group.students.filter((s) => s.currentYear === 2).length;
+    const y3Count = group.students.filter((s) => s.currentYear === 3).length;
+    const y4Count = group.students.filter((s) => s.currentYear === 4).length;
+    assert.equal(y2Count, 2, 'Mentor should get exactly 2 second-year students');
+    assert.equal(y3Count, 2, 'Mentor should get exactly 2 third-year students');
+    assert.equal(y4Count, 2, 'Mentor should get exactly 2 fourth-year students');
+  }
+});
+

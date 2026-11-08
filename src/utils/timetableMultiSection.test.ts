@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getSemestersForYear,
+  getOrdinalSemester,
   createDefaultMITMGrid,
   getStampedSlotData,
   validateCrossSectionClashes,
@@ -90,4 +91,15 @@ test('validateCrossSectionClashes detects when same faculty is scheduled in two 
   assert.equal(report.isValid, false);
   assert.equal(report.clashes.length, 1);
   assert.match(report.clashes[0], /Dr\. Ravi P/);
+});
+
+test('getOrdinalSemester formats semesters correctly', () => {
+  assert.equal(getOrdinalSemester(1), '1st Semester');
+  assert.equal(getOrdinalSemester(2), '2nd Semester');
+  assert.equal(getOrdinalSemester(3), '3rd Semester');
+  assert.equal(getOrdinalSemester(4), '4th Semester');
+  assert.equal(getOrdinalSemester(5), '5th Semester');
+  assert.equal(getOrdinalSemester(6), '6th Semester');
+  assert.equal(getOrdinalSemester(7), '7th Semester');
+  assert.equal(getOrdinalSemester(8), '8th Semester');
 });

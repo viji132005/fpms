@@ -23,6 +23,11 @@ import {
   ShieldCheck,
   Clock,
   HelpCircle,
+  History,
+  Trash2,
+  Shuffle,
+  ListOrdered,
+  FileText,
 } from 'lucide-react';
 
 export const MentorAllocationView: React.FC = () => {
@@ -52,9 +57,17 @@ export const MentorAllocationView: React.FC = () => {
   // Allocation State
   const [currentAllocation, setCurrentAllocation] = useState<MentorAllocation | null>(null);
   const [generatedResult, setGeneratedResult] = useState<any>(null);
+  const [allocationMode, setAllocationMode] = useState<'LINEAR' | 'RANDOM'>('LINEAR');
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Committed Records State
+  const [allCommittedAllocations, setAllCommittedAllocations] = useState<MentorAllocation[]>([]);
+  const [isLoadingCommitted, setIsLoadingCommitted] = useState(false);
+  const [showCommittedModal, setShowCommittedModal] = useState(false);
+  const [committedToDelete, setCommittedToDelete] = useState<MentorAllocation | null>(null);
+  const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
 
   // Commit Confirmation Modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -85,6 +98,19 @@ export const MentorAllocationView: React.FC = () => {
       .catch((err) => console.error(err));
   }, [deptId]);
 
+  const fetchCommittedAllocations = () => {
+    setIsLoadingCommitted(true);
+    authFetch(`/api/mentor-allocation?departmentId=${encodeURIComponent(deptId)}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: MentorAllocation[]) => {
+        if (Array.isArray(data)) {
+          setAllCommittedAllocations(data);
+        }
+      })
+      .catch((err) => console.error(err))
+      .finally(() => setIsLoadingCommitted(false));
+  };
+
   const fetchCurrentAllocation = () => {
     setIsLoading(true);
     authFetch(`/api/mentor-allocation?departmentId=${encodeURIComponent(deptId)}&year=${selectedYear}`)
@@ -103,6 +129,7 @@ export const MentorAllocationView: React.FC = () => {
   useEffect(() => {
     setGeneratedResult(null);
     fetchCurrentAllocation();
+    fetchCommittedAllocations();
   }, [selectedYear, deptId]);
 
   // Toggle mentor selection
@@ -120,12 +147,13 @@ export const MentorAllocationView: React.FC = () => {
     setSelectedMentorIds([]);
   };
 
-  // Run the Balanced Allocation Algorithm with custom selected faculty
-  const handleGenerate = async () => {
+  // Run the Balanced Allocation Algorithm supporting LINEAR or RANDOM
+  const handleGenerate = async (mode: 'LINEAR' | 'RANDOM' = 'LINEAR') => {
     if (selectedMentorIds.length === 0) {
       setErrorMessage('Please select at least one mentor faculty member before allocating.');
       return;
     }
+    setAllocationMode(mode);
     setIsLoading(true);
     setStatusMessage(null);
     setErrorMessage(null);
@@ -138,12 +166,15 @@ export const MentorAllocationView: React.FC = () => {
           studentYear: selectedYear,
           academicYear,
           selectedMentorIds,
+          mode,
         }),
       });
       const data = await res.json();
       setGeneratedResult(data);
       setStatusMessage(
-        'Allocation preview generated! Review the student roster below. You can Save as Draft or Confirm & Commit to Faculty.'
+        mode === 'RANDOM'
+          ? '✓ Random balanced allocation generated! Students of each year cohort (2nd, 3rd, 4th) are randomized and divided equally across mentors. Review below or Commit & Confirm to Faculty.'
+          : '✓ Linear sequence allocation generated! Students distributed sequentially by USN in balanced proportions (Δ <= 1). Review below or Commit & Confirm to Faculty.'
       );
     } catch (err) {
       console.error(err);
@@ -173,12 +204,14 @@ export const MentorAllocationView: React.FC = () => {
           academicYear,
           groups: rawGroups,
           publishImmediately,
+          allocationMode: generatedResult?.allocationMode || allocationMode,
         }),
       });
       const data = await res.json();
       if (res.ok) {
         setCurrentAllocation(data);
         setGeneratedResult(null);
+        fetchCommittedAllocations();
         setStatusMessage(
           publishImmediately
             ? '✓ Allocation officially committed and published! Allocated students now reflect in each faculty member’s corner separately under 2nd, 3rd, and 4th year tabs.'
@@ -193,13 +226,60 @@ export const MentorAllocationView: React.FC = () => {
     }
   };
 
-  // Export to Excel with Parent Phone No
-  const handleExportExcel = () => {
-    const activeGroups = generatedResult?.groups || currentAllocation?.groups;
-    if (!activeGroups) return;
+  // Delete Individual Committed Record
+  const handleDeleteCommittedRecord = async (id: string) => {
+    setIsLoading(true);
+    try {
+      const res = await authFetch(`/api/mentor-allocation/${id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setStatusMessage('✓ Committed mentor allocation record deleted successfully.');
+        setCommittedToDelete(null);
+        fetchCommittedAllocations();
+        fetchCurrentAllocation();
+      } else {
+        const errData = await res.json();
+        setErrorMessage(errData.error || 'Failed to delete committed record.');
+      }
+    } catch (err) {
+      setErrorMessage('Failed to delete committed record.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Clear All Committed History
+  const handleClearAllHistory = async () => {
+    setIsLoading(true);
+    setShowClearHistoryModal(false);
+    try {
+      const res = await authFetch('/api/mentor-allocation/clear-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ departmentId: deptId }),
+      });
+      if (res.ok) {
+        setStatusMessage('✓ Committed mentor allocation history cleared successfully.');
+        fetchCommittedAllocations();
+        fetchCurrentAllocation();
+      } else {
+        const errData = await res.json();
+        setErrorMessage(errData.error || 'Failed to clear history.');
+      }
+    } catch (err) {
+      setErrorMessage('Failed to clear history.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Export any allocation groups to Excel with Parent Phone No
+  const exportExcelForGroups = (rawGroups: any[], yearNum: number, acadYear: string) => {
+    if (!rawGroups || rawGroups.length === 0) return;
 
     const rows: any[] = [];
-    activeGroups.forEach((group: any, gIdx: number) => {
+    rawGroups.forEach((group: any, gIdx: number) => {
       let mentees = Array.isArray(group.students) && group.students.length > 0 ? group.students : [];
       if (mentees.length === 0 && Array.isArray(group.studentIds)) {
         mentees = group.studentIds
@@ -211,11 +291,10 @@ export const MentorAllocationView: React.FC = () => {
         rows.push({
           'Sl. No.': rows.length + 1,
           'Department': `${deptName} (${deptCode})`,
-          'Academic Year': academicYear,
-          'Student Year': selectedYear === 0 ? `Year ${s.currentYear || 'All'}` : `Year ${selectedYear}`,
+          'Academic Year': acadYear,
+          'Student Year': yearNum === 0 ? `Year ${s.currentYear || 'All'}` : `Year ${yearNum}`,
           'Mentor Sl.': gIdx + 1,
           'Mentor Faculty': group.mentorName,
-          'Mentor Staff ID': group.staffId,
           'Student USN': s.usn,
           'Student Full Name': s.fullName,
           'Student Email': s.email || 'N/A',
@@ -230,19 +309,17 @@ export const MentorAllocationView: React.FC = () => {
     XLSX.utils.book_append_sheet(wb, ws, 'Mentor_Allocation');
     XLSX.writeFile(
       wb,
-      `MIT_Mysore_${deptCode}_Mentor_Allocation_${selectedYear === 0 ? 'Combined_2nd_3rd_4th' : `Year${selectedYear}`}_${academicYear}.xlsx`
+      `MIT_Mysore_${deptCode}_Mentor_Allocation_${yearNum === 0 ? 'Combined_2nd_3rd_4th' : `Year${yearNum}`}_${acadYear}.xlsx`
     );
   };
 
   // Official College Circular PDF Generation matching MIT Mysore reference document
-  const handleExportPdf = async () => {
-    const rawGroups = generatedResult?.groups || currentAllocation?.groups;
+  const exportPdfForGroups = async (rawGroups: any[], yearNum: number, acadYear: string) => {
     if (!rawGroups || rawGroups.length === 0) {
-      setErrorMessage('No allocation groups found to export. Please run allocation first.');
+      setErrorMessage('No allocation groups found to export.');
       return;
     }
 
-    // Hydrate student objects with USN and fullName guaranteed
     const groupsToExport = rawGroups.map((g: any) => {
       let students = Array.isArray(g.students) && g.students.length > 0 ? g.students : [];
       if (students.length === 0 && Array.isArray(g.studentIds) && g.studentIds.length > 0) {
@@ -267,20 +344,30 @@ export const MentorAllocationView: React.FC = () => {
       const doc = await generateCollegeAllotmentPdf({
         departmentName: deptName,
         deptCode: deptCode,
-        academicYear: academicYear,
+        academicYear: acadYear,
         groups: groupsToExport,
       });
 
       const fileName =
-        selectedYear === 0
-          ? `MIT_Mysore_${deptCode}_Mentor_Mentee_List_2nd_3rd_4th_Year_${academicYear}.pdf`
-          : `MIT_Mysore_${deptCode}_Mentor_Mentee_List_Year${selectedYear}_${academicYear}.pdf`;
+        yearNum === 0
+          ? `MIT_Mysore_${deptCode}_Mentor_Mentee_List_2nd_3rd_4th_Year_${acadYear}.pdf`
+          : `MIT_Mysore_${deptCode}_Mentor_Mentee_List_Year${yearNum}_${acadYear}.pdf`;
 
       doc.save(fileName);
     } catch (err: any) {
       console.error('PDF export failed:', err);
-      setErrorMessage('Failed to generate PDF document. Please try again.');
+      setErrorMessage('Failed to generate PDF document.');
     }
+  };
+
+  const handleExportExcel = () => {
+    const activeGroups = generatedResult?.groups || currentAllocation?.groups;
+    exportExcelForGroups(activeGroups, selectedYear, academicYear);
+  };
+
+  const handleExportPdf = () => {
+    const activeGroups = generatedResult?.groups || currentAllocation?.groups;
+    exportPdfForGroups(activeGroups, selectedYear, academicYear);
   };
 
   // Hydrate active display groups with full student details
@@ -318,26 +405,25 @@ export const MentorAllocationView: React.FC = () => {
           </p>
         </div>
 
-        {activeDisplayGroups.length > 0 && (
-          <div className="flex items-center gap-2 self-start flex-wrap">
+        <div className="flex items-center gap-2 self-start flex-wrap">
+          <button
+            onClick={() => setShowCommittedModal(true)}
+            className="px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 shadow-sm"
+          >
+            <History className="w-4 h-4 text-[#7B1113]" />
+            <span>Allocation Records ({allCommittedAllocations.length})</span>
+          </button>
+          {activeDisplayGroups.length > 0 && (
             <button
               onClick={handleExportExcel}
-              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors"
+              className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl flex items-center gap-1.5 shadow-sm transition-colors"
               title="Download Excel spreadsheet of student allocation"
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
               <span>Export Excel</span>
             </button>
-            <button
-              onClick={handleExportPdf}
-              className="px-3 py-1.5 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg flex items-center gap-1.5 shadow-sm transition-colors"
-              title="Download official college circular in PDF format"
-            >
-              <Download className="w-4 h-4" />
-              <span>Download Official Allotment (.pdf)</span>
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {errorMessage && (
@@ -490,8 +576,8 @@ export const MentorAllocationView: React.FC = () => {
                       <div className="text-xs font-semibold text-slate-900 leading-tight">
                         {fac.fullName}
                       </div>
-                      <div className="text-[10px] text-slate-500 font-mono">
-                        {fac.staffId} • {fac.designation}
+                      <div className="text-[10px] text-slate-500 font-medium">
+                        {fac.designation}
                       </div>
                     </div>
                   </div>
@@ -514,31 +600,30 @@ export const MentorAllocationView: React.FC = () => {
         {user?.role === 'ADMIN' && (
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={handleGenerate}
+              onClick={() => handleGenerate('LINEAR')}
               disabled={isLoading || selectedMentorIds.length === 0}
-              className="px-4 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+              className="px-3.5 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm flex items-center gap-1.5 disabled:opacity-50 transition-colors cursor-pointer"
+              title="Allocate students sequentially by USN in balanced parity (Δ ≤ 1)"
             >
-              <Play className="w-3.5 h-3.5" />
-              <span>1. Run Allocation Algorithm</span>
+              <ListOrdered className="w-3.5 h-3.5" />
+              <span>1. Run Linear Allocation</span>
             </button>
 
-            {(generatedResult || currentAllocation?.status === 'DRAFT') && (
-              <button
-                onClick={() => handleSaveOrPublish(false)}
-                disabled={isLoading}
-                className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg flex items-center gap-1.5 shadow-sm"
-                title="Save draft to database without reflecting to faculty portals"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>2. Save Draft</span>
-              </button>
-            )}
+            <button
+              onClick={() => handleGenerate('RANDOM')}
+              disabled={isLoading || selectedMentorIds.length === 0}
+              className="px-3.5 py-2 text-xs font-semibold text-white bg-indigo-700 hover:bg-indigo-800 rounded-lg shadow-sm flex items-center gap-1.5 disabled:opacity-50 transition-colors cursor-pointer"
+              title="Allocate students randomly with balanced cohort division for each year (2nd, 3rd, 4th)"
+            >
+              <Shuffle className="w-3.5 h-3.5" />
+              <span>2. Run Random Allocation</span>
+            </button>
 
             {(generatedResult || currentAllocation) && (
               <button
                 onClick={() => setShowConfirmModal(true)}
                 disabled={isLoading || activeDisplayGroups.length === 0}
-                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg shadow-sm flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg shadow-sm flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
                 title="Commit allocation with explicit confirmation to reflect across all faculty corners"
               >
                 <ShieldCheck className="w-4 h-4" />
@@ -589,6 +674,23 @@ export const MentorAllocationView: React.FC = () => {
               {totalAllocatedStudents} Students
             </span>
           </div>
+
+          <div>
+            <span className="text-[10px] text-slate-500 uppercase font-semibold block">Allocation Strategy</span>
+            <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
+              {(generatedResult?.allocationMode || currentAllocation?.allocationMode || allocationMode) === 'RANDOM' ? (
+                <span className="inline-flex items-center gap-1 text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                  <Shuffle className="w-3 h-3" />
+                  <span>Random Balanced</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[#7B1113] bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                  <ListOrdered className="w-3 h-3" />
+                  <span>Linear Sequence</span>
+                </span>
+              )}
+            </span>
+          </div>
         </div>
 
         {activeDisplayGroups.length > 0 && (
@@ -632,7 +734,6 @@ export const MentorAllocationView: React.FC = () => {
                         </span>
                         <h2 className="text-xs font-bold text-slate-900">{group.mentorName}</h2>
                       </div>
-                      <span className="font-mono text-[10px] text-slate-500 ml-6 block">{group.staffId}</span>
                     </div>
                     <span className="px-2 py-0.5 rounded text-[11px] font-bold text-[#7B1113] bg-rose-50 border border-rose-200 tabular-nums">
                       {mentees.length} Mentees
@@ -757,6 +858,229 @@ export const MentorAllocationView: React.FC = () => {
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>Yes, Confirm & Commit to Faculty</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Committed Records Modal */}
+      {showCommittedModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full p-6 text-slate-800 space-y-4 max-h-[90vh] flex flex-col animate-in fade-in-50 zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-[#7B1113]" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Committed Mentor Allocation Records ({deptCode})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Officially committed and published mentor rosters. Download PDF / Excel or manage records.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {user?.role === 'ADMIN' && allCommittedAllocations.length > 0 && (
+                  <button
+                    onClick={() => setShowClearHistoryModal(true)}
+                    className="px-2.5 py-1 text-xs font-semibold text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                    title="Clear all committed mentor records"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear All</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowCommittedModal(false)}
+                  className="text-slate-400 hover:text-slate-600 rounded-lg p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto space-y-3 pr-1 grow">
+              {isLoadingCommitted ? (
+                <div className="py-12 text-center text-xs text-slate-400">Loading committed records...</div>
+              ) : allCommittedAllocations.length === 0 ? (
+                <div className="py-12 text-center text-slate-500 text-xs">
+                  No mentor allocations have been committed yet for this department. Use the Allocation Wizard to generate and commit an allocation.
+                </div>
+              ) : (
+                allCommittedAllocations.map((rec) => {
+                  const menteeCount = rec.groups.reduce(
+                    (sum, g) => sum + (g.students?.length || g.studentIds?.length || 0),
+                    0
+                  );
+                  const isCurrentYear = rec.studentYear === selectedYear;
+
+                  return (
+                    <div
+                      key={rec.id}
+                      className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-slate-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-slate-900">
+                            {rec.studentYear === 0
+                              ? 'Combined (2nd, 3rd & 4th Year)'
+                              : `Year ${rec.studentYear}`}
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            COMMITTED
+                          </span>
+                          {rec.allocationMode && (
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                rec.allocationMode === 'RANDOM'
+                                  ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                                  : 'bg-rose-50 text-[#7B1113] border-rose-200'
+                              }`}
+                            >
+                              {rec.allocationMode === 'RANDOM' ? 'RANDOM BALANCED' : 'LINEAR SEQUENCE'}
+                            </span>
+                          )}
+                          {isCurrentYear && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                              Active in View
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="text-xs text-slate-600">
+                          {rec.groups.length} Faculty Mentors · {menteeCount} Total Students Allocated
+                        </div>
+
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          Committed on: {new Date(rec.publishedAt || rec.createdAt).toLocaleDateString()} {rec.publishedByName ? `by ${rec.publishedByName}` : ''} · Academic Year: {rec.academicYear}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                        <button
+                          onClick={() => exportExcelForGroups(rec.groups, rec.studentYear, rec.academicYear)}
+                          className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                          title="Download Excel spreadsheet"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Excel</span>
+                        </button>
+                        <button
+                          onClick={() => exportPdfForGroups(rec.groups, rec.studentYear, rec.academicYear)}
+                          className="px-2.5 py-1.5 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                          title="Download Official Allotment PDF"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>PDF</span>
+                        </button>
+                        {user?.role === 'ADMIN' && (
+                          <button
+                            onClick={() => setCommittedToDelete(rec)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-lg transition-colors cursor-pointer"
+                            title="Delete this committed record"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowCommittedModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Single Record Modal */}
+      {committedToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-6 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Delete Committed Mentor Record?</h3>
+                <p className="text-xs text-slate-500">
+                  {committedToDelete.studentYear === 0
+                    ? 'Combined (2nd, 3rd & 4th Year)'
+                    : `Year ${committedToDelete.studentYear}`} · Academic Year {committedToDelete.academicYear}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              This will remove this committed mentor allocation record from the database. Note that faculty records will remain until re-allocated.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setCommittedToDelete(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteCommittedRecord(committedToDelete.id)}
+                disabled={isLoading}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Record</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear All History Modal */}
+      {showClearHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-6 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Clear All Committed History?</h3>
+                <p className="text-xs text-slate-500">Department: {deptCode}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Are you sure you want to remove all saved mentor allocation records for {deptName}? This action cannot be undone.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowClearHistoryModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAllHistory}
+                disabled={isLoading}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear All Records</span>
               </button>
             </div>
           </div>

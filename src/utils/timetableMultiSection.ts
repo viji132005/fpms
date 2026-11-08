@@ -55,6 +55,16 @@ export function getSemesterRoman(sem: number): string {
 }
 
 /**
+ * Returns ordinal semester string (e.g. '1st Semester', '2nd Semester', '3rd Semester', ...)
+ */
+export function getOrdinalSemester(sem: number): string {
+  if (sem === 1) return '1st Semester';
+  if (sem === 2) return '2nd Semester';
+  if (sem === 3) return '3rd Semester';
+  return `${sem}th Semester`;
+}
+
+/**
  * Creates a clean default MIT Mysore timetable grid for a section
  */
 export function createDefaultMITMGrid(section: string, defaultRoom: string = ''): TimetableSlot[] {

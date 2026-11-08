@@ -6,13 +6,13 @@ import {
   executePerformanceBalancedAllocation,
   validatePerformanceBands,
   DEFAULT_PERFORMANCE_BANDS,
-  CandidateStudentInput,
-  SectionConfig,
+  type CandidateStudentInput,
+  type SectionConfig,
 } from './sectionAllocation.ts';
 import {
   generateSemesterProgressionPreview,
   executeSemesterProgression,
-  PromotionCandidate,
+  type PromotionCandidate,
 } from './promotion.ts';
 import {
   generatePerformanceTemplate,

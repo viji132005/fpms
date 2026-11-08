@@ -197,14 +197,12 @@ export async function generateCollegeAllotmentPdf(options: AllotmentPdfOptions):
       currentY = drawHeader(doc, false);
     }
 
-    // Faculty Name Header: e.g. "1.Faculty Name: DR. ANITHA K (MITM-ISE-015)"
+    // Faculty Name Header: e.g. "1.Faculty Name: DR. ANITHA K"
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(15, 23, 42);
     doc.text(
-      `${gIdx + 1}.Faculty Name: ${group.mentorName.toUpperCase()}${
-        group.staffId ? ` (${group.staffId})` : ''
-      }`,
+      `${gIdx + 1}.Faculty Name: ${group.mentorName.toUpperCase()}`,
       margin,
       currentY + 4
     );

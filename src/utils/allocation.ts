@@ -42,27 +42,67 @@ export interface AllocationResult {
   totalStudentsAllocated: number;
   totalMentors: number;
   unassignedStudents: StudentRecord[];
+  allocationMode?: 'LINEAR' | 'RANDOM';
+  randomSeed?: string;
 }
 
 /**
- * Computes a balanced, deterministic mentor allocation
+ * Fast seeded pseudorandom number generator (MurmurHash3-like 32-bit PRNG)
+ */
+export function createPRNG(seedStr: string): () => number {
+  let h = 1779033703 ^ seedStr.length;
+  for (let i = 0; i < seedStr.length; i++) {
+    h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function () {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return ((h ^= h >>> 16) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Fisher-Yates shuffle using a seeded PRNG
+ */
+export function shuffleWithSeed<T>(array: T[], rng: () => number): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/**
+ * Computes a balanced mentor allocation supporting LINEAR (by USN sequence) or RANDOM (balanced shuffle)
  */
 export function calculateBalancedMentorAllocation(
   students: StudentRecord[],
   mentors: MentorFacultyRecord[],
   departmentId: string,
   academicYear: string,
-  studentYear: number
+  studentYear: number,
+  mode: 'LINEAR' | 'RANDOM' = 'LINEAR',
+  seed?: string
 ): AllocationResult {
+  const randomSeed = seed || `seed-mentor-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+  const rng = createPRNG(randomSeed);
+
   // 1. Filter eligible students: must be ACTIVE, in department, matching year
-  const eligibleStudents = students
+  let eligibleStudents = students
     .filter(
       (s) =>
         s.status === 'ACTIVE' &&
         (s.departmentId === departmentId || !s.departmentId || s.departmentId === 'dept-ise') &&
         s.currentYear === studentYear
-    )
-    .sort((a, b) => a.usn.localeCompare(b.usn)); // Deterministic order by USN
+    );
+
+  if (mode === 'RANDOM') {
+    eligibleStudents = shuffleWithSeed(eligibleStudents, rng);
+  } else {
+    eligibleStudents.sort((a, b) => a.usn.localeCompare(b.usn)); // Deterministic order by USN
+  }
 
   // 2. Filter eligible mentors: must be ACTIVE, in department, marked isMentorEligible
   const eligibleMentors = mentors
@@ -89,6 +129,8 @@ export function calculateBalancedMentorAllocation(
       totalStudentsAllocated: 0,
       totalMentors: eligibleMentors.length,
       unassignedStudents: eligibleMentors.length === 0 ? eligibleStudents : [],
+      allocationMode: mode,
+      randomSeed: mode === 'RANDOM' ? randomSeed : undefined,
     };
   }
 
@@ -107,7 +149,7 @@ export function calculateBalancedMentorAllocation(
     targetCount: idx < remainder ? baseQuota + 1 : baseQuota,
   }));
 
-  // Distribute students deterministically
+  // Distribute students deterministically or randomly according to mode
   let studentIndex = 0;
   for (const group of groups) {
     for (let i = 0; i < group.targetCount; i++) {
@@ -126,6 +168,8 @@ export function calculateBalancedMentorAllocation(
     totalStudentsAllocated: studentIndex,
     totalMentors: M,
     unassignedStudents: eligibleStudents.slice(studentIndex),
+    allocationMode: mode,
+    randomSeed: mode === 'RANDOM' ? randomSeed : undefined,
   };
 }
 
@@ -150,8 +194,13 @@ export function calculateCombinedMultiYearAllocation(
   mentors: MentorFacultyRecord[],
   departmentId: string,
   academicYear: string,
-  targetYears: number[] = [2, 3, 4]
+  targetYears: number[] = [2, 3, 4],
+  mode: 'LINEAR' | 'RANDOM' = 'LINEAR',
+  seed?: string
 ): AllocationResult {
+  const randomSeed = seed || `seed-mentor-multi-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+  const rng = createPRNG(randomSeed);
+
   const eligibleMentors = mentors
     .filter(
       (m) =>
@@ -170,6 +219,8 @@ export function calculateCombinedMultiYearAllocation(
       totalStudentsAllocated: 0,
       totalMentors: 0,
       unassignedStudents: [],
+      allocationMode: mode,
+      randomSeed: mode === 'RANDOM' ? randomSeed : undefined,
     };
   }
 
@@ -183,14 +234,19 @@ export function calculateCombinedMultiYearAllocation(
 
   let totalAllocated = 0;
   targetYears.forEach((yr) => {
-    const yrStudents = students
+    let yrStudents = students
       .filter(
         (s) =>
           s.status === 'ACTIVE' &&
           (s.departmentId === departmentId || !s.departmentId || s.departmentId === 'dept-ise') &&
           s.currentYear === yr
-      )
-      .sort((a, b) => a.usn.localeCompare(b.usn));
+      );
+
+    if (mode === 'RANDOM') {
+      yrStudents = shuffleWithSeed(yrStudents, rng);
+    } else {
+      yrStudents.sort((a, b) => a.usn.localeCompare(b.usn));
+    }
 
     const M = groups.length;
     const N = yrStudents.length;
@@ -221,5 +277,7 @@ export function calculateCombinedMultiYearAllocation(
     totalStudentsAllocated: totalAllocated,
     totalMentors: groups.length,
     unassignedStudents: [],
+    allocationMode: mode,
+    randomSeed: mode === 'RANDOM' ? randomSeed : undefined,
   };
 }

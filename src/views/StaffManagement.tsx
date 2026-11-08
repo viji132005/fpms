@@ -363,7 +363,7 @@ export const StaffManagement: React.FC = () => {
               autoComplete="off"
               autoCorrect="off"
               spellCheck={false}
-              placeholder="Search by name, ID, or email..."
+              placeholder="Search by name or email..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg w-52 sm:w-64 focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
@@ -383,7 +383,7 @@ export const StaffManagement: React.FC = () => {
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
                 <th className="py-3 px-3 text-center w-16">Sl. No.</th>
-                <th className="py-3 px-4">Staff Member & ID</th>
+                <th className="py-3 px-4">Staff Member</th>
                 <th className="py-3 px-4">Designation & Department</th>
                 <th className="py-3 px-4">Qualifications</th>
                 <th className="py-3 px-4">Contact Info (Login Credentials)</th>
@@ -417,7 +417,6 @@ export const StaffManagement: React.FC = () => {
                         </div>
                         <div>
                           <div className="font-semibold text-slate-900">{member.fullName}</div>
-                          <div className="text-[10px] text-slate-500 font-mono">{member.staffId}</div>
                         </div>
                       </div>
                     </td>

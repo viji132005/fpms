@@ -54,7 +54,7 @@ import {
   getInitialSubjectAllocations,
   getInitial6thSemTimetables,
 } from './seedTimetableData.ts';
-import { validateCrossSectionClashes } from '../utils/timetableMultiSection.ts';
+import { validateCrossSectionClashes, getOrdinalSemester } from '../utils/timetableMultiSection.ts';
 
 export const apiRouter = express.Router();
 
@@ -2321,6 +2321,7 @@ apiRouter.post(
       parentPhone: s.parentPhone,
     }));
 
+    const allocMode: 'LINEAR' | 'RANDOM' = req.body.mode === 'RANDOM' ? 'RANDOM' : 'LINEAR';
     const result =
       currentYear === 0
         ? calculateCombinedMultiYearAllocation(
@@ -2328,17 +2329,22 @@ apiRouter.post(
             eligibleFaculty,
             departmentId,
             currAcademicYear,
-            [2, 3, 4]
+            [2, 3, 4],
+            allocMode
           )
         : calculateBalancedMentorAllocation(
             eligibleStudents,
             eligibleFaculty,
             departmentId,
             currAcademicYear,
-            currentYear
+            currentYear,
+            allocMode
           );
 
-    return res.json(result);
+    return res.json({
+      ...result,
+      allocationMode: allocMode,
+    });
   }
 );
 
@@ -2347,7 +2353,7 @@ apiRouter.post(
   authMiddleware,
   requireRole(['ADMIN', 'HOD']),
   (req: AuthenticatedRequest, res: Response) => {
-    const { departmentId, studentYear, academicYear, groups, publishImmediately } = req.body;
+    const { departmentId, studentYear, academicYear, groups, publishImmediately, allocationMode } = req.body;
     if (!departmentId || studentYear === undefined || !Array.isArray(groups)) {
       return res.status(400).json({ error: 'Invalid allocation data.' });
     }
@@ -2364,6 +2370,7 @@ apiRouter.post(
     const versionNumber = existing ? existing.versionNumber + 1 : 1;
     const status = publishImmediately ? 'PUBLISHED' : 'DRAFT';
     const publishedAt = publishImmediately ? new Date().toISOString() : undefined;
+    const publishedByName = publishImmediately ? req.user?.email || 'Academic Office' : undefined;
 
     const newAllocation: MentorAllocation = {
       id: `alloc-${departmentId}-${yearNum}-${Date.now()}`,
@@ -2374,7 +2381,9 @@ apiRouter.post(
       versionNumber,
       createdById: req.user!.id,
       publishedAt,
+      publishedByName,
       createdAt: new Date().toISOString(),
+      allocationMode: allocationMode === 'RANDOM' ? 'RANDOM' : 'LINEAR',
       groups: groups.map((g: any) => ({
         mentorId: g.mentorId,
         mentorName: g.mentorName,
@@ -2402,17 +2411,18 @@ apiRouter.post(
             student.mentorStaffId = group.staffId || mentorProfile?.staffId;
           }
         }
-
-        // Dispatch notifications to all assigned mentors
-        dispatchNotification(
-          group.mentorId,
-          'Mentor Students Allocated',
-          `You have been allocated ${group.studentIds.length} mentee(s) for ${yearNum === 0 ? 'Combined 2nd, 3rd & 4th Years' : `Year ${yearNum}`} (${currAcademicYear}).`,
-          'MENTOR_ALLOCATED',
-          '/faculty/mentees',
-          { id: req.user!.id, name: 'Academic Office' }
-        );
       }
+
+      // Dispatch ONE single official broadcast circular for the department
+      const cohortLabel = yearNum === 0 ? 'Combined 2nd, 3rd & 4th Years' : `Year ${yearNum}`;
+      dispatchNotification(
+        'FACULTY',
+        'Official Mentor-Mentee Allocation Committed',
+        `Official mentor allocation for ${cohortLabel} (${currAcademicYear}) has been committed and published across ${newAllocation.groups.length} faculty mentors.`,
+        'CIRCULAR',
+        '/faculty/mentees',
+        { id: req.user!.id, name: 'Academic Office' }
+      );
     }
 
     db.save();
@@ -2451,6 +2461,73 @@ apiRouter.post(
     };
 
     return res.status(201).json(allocationWithStudents);
+  }
+);
+
+apiRouter.delete(
+  '/mentor-allocation/:id',
+  authMiddleware,
+  requireRole(['ADMIN', 'HOD']),
+  (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { id } = req.params;
+      const data = db.getData();
+      if (!data.mentorAllocations) data.mentorAllocations = [];
+      const idx = data.mentorAllocations.findIndex((a) => a.id === id);
+      if (idx === -1) {
+        return res.status(404).json({ error: 'Mentor allocation record not found.' });
+      }
+
+      const record = data.mentorAllocations[idx];
+      data.mentorAllocations.splice(idx, 1);
+      db.save();
+
+      logAudit(
+        { id: req.user!.id, email: req.user!.email, role: req.user!.role },
+        'DELETE_MENTOR_ALLOCATION',
+        'MENTOR_ALLOCATION',
+        id,
+        `Deleted mentor allocation record ${id} (Year ${record.studentYear === 0 ? 'Combined' : record.studentYear}, AY ${record.academicYear}).`,
+        req
+      );
+
+      return res.json({ success: true, message: 'Committed mentor allocation record deleted successfully.' });
+    } catch (err: any) {
+      console.error('Delete mentor allocation failed:', err);
+      return res.status(500).json({ error: 'Failed to delete committed record.' });
+    }
+  }
+);
+
+apiRouter.post(
+  '/mentor-allocation/clear-history',
+  authMiddleware,
+  requireRole(['ADMIN', 'HOD']),
+  (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { departmentId } = req.body;
+      const data = db.getData();
+      if (!data.mentorAllocations) data.mentorAllocations = [];
+      data.mentorAllocations = data.mentorAllocations.filter((a) => {
+        if (departmentId && a.departmentId !== departmentId) return true;
+        return false;
+      });
+      db.save();
+
+      logAudit(
+        { id: req.user!.id, email: req.user!.email, role: req.user!.role },
+        'CLEAR_MENTOR_ALLOCATION_HISTORY',
+        'MENTOR_ALLOCATION',
+        departmentId || 'all',
+        `Cleared committed mentor allocation history for department ${departmentId || 'all'}.`,
+        req
+      );
+
+      return res.json({ success: true, message: 'Committed mentor allocation history cleared successfully.' });
+    } catch (err: any) {
+      console.error('Clear mentor allocation history failed:', err);
+      return res.status(500).json({ error: 'Failed to clear history.' });
+    }
   }
 );
 
@@ -2751,7 +2828,7 @@ apiRouter.post('/timetables/multi-section-save', authMiddleware, requireRole(['A
   const now = new Date().toISOString();
   const depId = departmentId || 'dept-ise';
   const yr = Number(year) || 3;
-  const semName = typeof semester === 'string' ? semester : `${semester}th Semester`;
+  const semName = typeof semester === 'string' ? semester : getOrdinalSemester(Number(semester));
 
   // Cross-section collision check
   const crossCheck = validateCrossSectionClashes(
@@ -2759,6 +2836,14 @@ apiRouter.post('/timetables/multi-section-save', authMiddleware, requireRole(['A
   );
 
   const savedResults: StructuredTimetable[] = [];
+
+  if (publishAll && crossCheck.isValid) {
+    // When a new semester is committed for this year cohort (e.g. 1st Year Sem 2),
+    // remove the previous committed semester records (e.g. Sem 1) so only the latest semester is active
+    data.structuredTimetables = data.structuredTimetables.filter(
+      (st) => !(st.departmentId === depId && st.studentYear === yr && st.semester !== semName)
+    );
+  }
 
   for (const t of timetables) {
     let existing = data.structuredTimetables.find(
@@ -2890,20 +2975,111 @@ apiRouter.get(
       );
     }
 
-    if (semester) {
-      list = list.filter((t) => t.semester === semester);
+    if (year) {
+      const yrNum = Number(year);
+      list = list.filter((t) => t.studentYear === yrNum);
+      if (semester) {
+        const semReq = String(semester).trim().toLowerCase();
+        const reqNum = parseInt(semReq.replace(/\D/g, ''), 10);
+        list = list.filter((t) => {
+          const tSem = String(t.semester || '').trim().toLowerCase();
+          const tNum = parseInt(tSem.replace(/\D/g, ''), 10);
+          if (!isNaN(reqNum) && !isNaN(tNum)) {
+            return reqNum === tNum;
+          }
+          return tSem === semReq;
+        });
+      }
+    } else if (semester) {
+      const semReq = String(semester).trim().toLowerCase();
+      const reqNum = parseInt(semReq.replace(/\D/g, ''), 10);
+      list = list.filter((t) => {
+        const tSem = String(t.semester || '').trim().toLowerCase();
+        const tNum = parseInt(tSem.replace(/\D/g, ''), 10);
+        if (!isNaN(reqNum) && !isNaN(tNum)) {
+          return reqNum === tNum;
+        }
+        return tSem === semReq;
+      });
     }
+
     if (section) {
       list = list.filter((t) => t.section === section);
-    }
-    if (year) {
-      list = list.filter((t) => t.studentYear === Number(year));
     }
     if (status && currentUser.role === 'ADMIN') {
       list = list.filter((t) => t.status === status);
     }
 
     return res.json(list);
+  }
+);
+
+// Memory-Efficient Committed Timetables Overview (Last committed record per year 1st-4th)
+apiRouter.get(
+  '/timetables/committed-records',
+  authMiddleware,
+  (req: AuthenticatedRequest, res: Response) => {
+    const { departmentId } = req.query;
+    const data = db.getData();
+    const currentUser = req.user!;
+    const depId = (currentUser.role === 'ADMIN' && departmentId)
+      ? (departmentId as string)
+      : (currentUser.departmentId || 'dept-ise');
+
+    // Only active published/committed timetables for this department
+    const published = (data.structuredTimetables || []).filter(
+      (t) => t.departmentId === depId && t.status === 'PUBLISHED'
+    );
+
+    // Build the latest committed snapshot for each academic year cohort (1st, 2nd, 3rd, 4th)
+    const records = [1, 2, 3, 4].map((yr) => {
+      const yrTimetables = published.filter((t) => t.studentYear === yr);
+      const yearLabel = yr === 1 ? '1st Year' : yr === 2 ? '2nd Year' : yr === 3 ? '3rd Year' : '4th Year';
+
+      if (yrTimetables.length > 0) {
+        // Sort by publishedAt or updatedAt descending to pick latest committed session
+        yrTimetables.sort(
+          (a, b) =>
+            new Date(b.publishedAt || b.updatedAt).getTime() -
+            new Date(a.publishedAt || a.updatedAt).getTime()
+        );
+        const latest = yrTimetables[0];
+        const matchingBatch = yrTimetables.filter((t) => t.semester === latest.semester);
+        const sections = Array.from(new Set(matchingBatch.map((t) => t.section))).sort();
+        const totalSlots = matchingBatch.reduce(
+          (acc, t) => acc + (t.schedule?.filter((s) => s.courseCode).length || 0),
+          0
+        );
+
+        return {
+          year: yr,
+          yearLabel,
+          hasCommitted: true,
+          semester: latest.semester,
+          academicYear: latest.academicYear || data.institution.currentAcademicYear,
+          committedAt: latest.publishedAt || latest.updatedAt,
+          committedBy: latest.publishedBy || 'Department Admin',
+          sections,
+          totalSlots,
+          timetables: matchingBatch,
+        };
+      }
+
+      return {
+        year: yr,
+        yearLabel,
+        hasCommitted: false,
+        semester: getOrdinalSemester(yr * 2 - 1),
+        academicYear: data.institution.currentAcademicYear,
+        committedAt: null,
+        committedBy: null,
+        sections: [],
+        totalSlots: 0,
+        timetables: [],
+      };
+    });
+
+    return res.json({ success: true, departmentId: depId, records });
   }
 );
 
@@ -4247,7 +4423,9 @@ apiRouter.post(
     const dur = durationDays ? Number(durationDays) : 0;
     const now = new Date();
     let expiresAt: string | undefined = undefined;
-    if (dur > 0) {
+    if (req.body.expiresAt) {
+      expiresAt = new Date(req.body.expiresAt).toISOString();
+    } else if (dur > 0) {
       const expDate = new Date(now.getTime() + dur * 24 * 60 * 60 * 1000);
       expiresAt = expDate.toISOString();
     }
@@ -4411,7 +4589,9 @@ apiRouter.put(
     if (visibility) post.visibility = visibility;
     if (isPinned !== undefined) (post as any).isPinned = !!isPinned;
 
-    if (durationDays !== undefined) {
+    if (req.body.expiresAt !== undefined) {
+      post.expiresAt = req.body.expiresAt ? new Date(req.body.expiresAt).toISOString() : undefined;
+    } else if (durationDays !== undefined) {
       const dur = Number(durationDays);
       (post as any).durationDays = dur;
       if (dur > 0) {
@@ -4616,14 +4796,19 @@ apiRouter.get(
         return false;
       });
 
-      // Deduplicate circulars by actorUserId + title + approximate timestamp to fix legacy 20-copy bugs
+      // Deduplicate circulars and broadcast notifications by title + approximate timestamp to prevent duplicate copies
       const seen = new Set<string>();
       const result: Notification[] = [];
       for (const n of notifs) {
-        const dedupeKey =
-          n.type === 'CIRCULAR'
-            ? `${n.actorUserId || 'actor'}_${n.title}_${(n.createdAt || '').substring(0, 16)}`
-            : n.id;
+        const isBroadcastOrCircular =
+          n.type === 'CIRCULAR' ||
+          n.type === 'MENTOR_ALLOCATED' ||
+          n.title.toLowerCase().includes('mentor') ||
+          n.title.toLowerCase().includes('circular');
+
+        const dedupeKey = isBroadcastOrCircular
+          ? `${n.title}_${(n.createdAt || '').substring(0, 16)}`
+          : n.id;
 
         if (!seen.has(dedupeKey)) {
           seen.add(dedupeKey);
@@ -5047,8 +5232,9 @@ apiRouter.post(
 
       let result;
       if (method === 'PERFORMANCE') {
-        if (!performanceMetric || (performanceMetric !== 'CGPA' && performanceMetric !== 'SGPA')) {
-          return res.status(400).json({ error: 'Valid performance metric (CGPA or SGPA) must be selected.' });
+        const validMetrics = ['CGPA', 'SGPA', 'CGPA/SGPA', 'CGPA / SGPA'];
+        if (!performanceMetric || !validMetrics.includes(performanceMetric)) {
+          return res.status(400).json({ error: 'Valid performance metric (CGPA / SGPA) must be selected.' });
         }
         result = executePerformanceBalancedAllocation(
           candidateInputs,

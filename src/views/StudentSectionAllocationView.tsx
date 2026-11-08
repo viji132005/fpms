@@ -85,9 +85,8 @@ export const StudentSectionAllocationView: React.FC = () => {
   // Allocation Method
   const [allocationMethod, setAllocationMethod] = useState<'RANDOM' | 'PERFORMANCE'>('RANDOM');
 
-  // Method B: Performance Balanced Settings (Separated CGPA vs SGPA)
-  const [performanceMetric, setPerformanceMetric] = useState<'CGPA' | 'SGPA'>('CGPA');
-  const [sgpaSemester, setSgpaSemester] = useState<number>(3);
+  // Method B: Performance Balanced Settings (Combined CGPA / SGPA)
+  const [performanceMetric, setPerformanceMetric] = useState<'CGPA/SGPA' | 'CGPA' | 'SGPA'>('CGPA/SGPA');
   const [missingScorePolicy, setMissingScorePolicy] = useState<'LOWEST_BAND' | 'DISTRIBUTE_EVENLY' | 'UNASSIGNED'>('LOWEST_BAND');
 
   // Dynamic Performance Bands (configurable number of parts & ranges)
@@ -279,13 +278,12 @@ export const StudentSectionAllocationView: React.FC = () => {
       fullName: s.fullName,
     }));
     const cohortLabel = `Year ${selectedYear} (Semester ${selectedSemester}) — Dept: ${deptCode}`;
-    const semLabel = performanceMetric === 'SGPA' ? `Sem ${sgpaSemester}` : undefined;
 
     const fileBytes = generatePerformanceTemplate(
       studentsPayload,
-      performanceMetric,
+      'CGPA / SGPA',
       cohortLabel,
-      semLabel
+      undefined
     );
 
     const blob = new Blob([fileBytes.buffer as ArrayBuffer], {
@@ -294,7 +292,7 @@ export const StudentSectionAllocationView: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `MIT_Mysore_${deptCode}_Year${selectedYear}_${performanceMetric}_Entry_Template.xlsx`;
+    link.download = `MIT_Mysore_${deptCode}_Year${selectedYear}_CGPA_SGPA_Entry_Template.xlsx`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -394,7 +392,7 @@ export const StudentSectionAllocationView: React.FC = () => {
         status: 'DRAFT',
         method: allocationMethod,
         performanceMetric: allocationMethod === 'PERFORMANCE' ? performanceMetric : null,
-        sgpaSemester: allocationMethod === 'PERFORMANCE' && performanceMetric === 'SGPA' ? sgpaSemester : null,
+        sgpaSemester: null,
         randomSeed: freshRandomSeed,
         algorithmVersion: data.result.algorithmVersion || '1.0-BALANCED',
         sections: sectionConfigs,
@@ -1019,34 +1017,21 @@ export const StudentSectionAllocationView: React.FC = () => {
               {/* Sub-settings for Performance Balanced Allocation */}
               {allocationMethod === 'PERFORMANCE' && (
                 <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-6">
-                  {/* Metric Choice: Separate CGPA vs SGPA */}
+                  {/* Metric Choice: Unified CGPA / SGPA */}
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
-                      Select Performance Metric (0.0 to 10.0 scale):
+                      Performance Metric (0.0 to 10.0 scale):
                     </label>
-                    <div className="grid grid-cols-2 gap-3 max-w-md">
-                      <button
-                        type="button"
-                        onClick={() => setPerformanceMetric('CGPA')}
-                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                          performanceMetric === 'CGPA'
-                            ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-sm'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        CGPA (Cumulative)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPerformanceMetric('SGPA')}
-                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                          performanceMetric === 'SGPA'
-                            ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-sm'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        SGPA (Semester Grade)
-                      </button>
+                    <div className="max-w-md">
+                      <div className="py-2.5 px-4 rounded-xl border bg-[#7B1113] text-white border-[#7B1113] shadow-xs flex items-center justify-between text-xs font-bold">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                          <span>CGPA / SGPA</span>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
+                        Unified 10-point academic scale. Accepts cumulative CGPA or semester-wise SGPA scores (0.00 – 10.00) for balanced section distribution.
+                      </p>
                     </div>
                   </div>
 
@@ -1126,10 +1111,10 @@ export const StudentSectionAllocationView: React.FC = () => {
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div>
                         <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
-                          Upload Student {performanceMetric} Excel / CSV File:
+                          Upload Student CGPA / SGPA Excel / CSV File:
                         </label>
                         <p className="text-[11px] text-slate-500 mt-0.5">
-                          Matches student USN automatically from any column structure (Name, Email, USN, {performanceMetric}).
+                          Matches student USN automatically from any column structure (Name, Email, USN, CGPA / SGPA).
                         </p>
                       </div>
 
@@ -1148,7 +1133,7 @@ export const StudentSectionAllocationView: React.FC = () => {
                         <Upload className="w-5 h-5 text-[#7B1113]" />
                         <div>
                           <div className="text-xs font-bold text-slate-800">
-                            {uploadedFileName ? uploadedFileName : `Select Excel (.xlsx) containing USN & ${performanceMetric}`}
+                            {uploadedFileName ? uploadedFileName : 'Select Excel (.xlsx) containing USN & CGPA / SGPA'}
                           </div>
                           <div className="text-[11px] text-slate-500">
                             {excelValidationReport
@@ -1212,7 +1197,7 @@ export const StudentSectionAllocationView: React.FC = () => {
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
-                    Divided {currentRun.totalStudentsCount} students into {currentRun.sections.length} sections using {currentRun.method === 'RANDOM' ? 'Random Balanced Allocation' : `Performance Balanced (${currentRun.performanceMetric})`}. Click any section card below to view its student roster.
+                    Divided {currentRun.totalStudentsCount} students into {currentRun.sections.length} sections using {currentRun.method === 'RANDOM' ? 'Random Balanced Allocation' : `Performance Balanced (${currentRun.performanceMetric === 'CGPA/SGPA' ? 'CGPA / SGPA' : currentRun.performanceMetric || 'CGPA / SGPA'})`}. Click any section card below to view its student roster.
                   </p>
                 </div>
 
@@ -1301,9 +1286,9 @@ export const StudentSectionAllocationView: React.FC = () => {
                           </span>
                         </div>
 
-                        {avg !== null && avg !== undefined && (
+                        {avg !== null && avg !== undefined && Number(avg) > 0 && (
                           <div className={`text-[11px] font-mono mt-1 ${isCardSelected ? 'text-rose-100' : 'text-slate-500'}`}>
-                            Avg {currentRun.performanceMetric}: <strong>{avg}</strong>
+                            Avg CGPA / SGPA: <strong>{avg}</strong>
                           </div>
                         )}
 
@@ -1349,7 +1334,9 @@ export const StudentSectionAllocationView: React.FC = () => {
                         <th className="py-2.5 px-3 text-center">Assigned Section</th>
                         {currentRun.method === 'PERFORMANCE' && (
                           <>
-                            <th className="py-2.5 px-3 text-center font-mono">{currentRun.performanceMetric}</th>
+                            <th className="py-2.5 px-3 text-center font-mono">
+                              {currentRun.performanceMetric === 'CGPA/SGPA' ? 'CGPA / SGPA' : currentRun.performanceMetric || 'CGPA / SGPA'}
+                            </th>
                             <th className="py-2.5 px-3">Performance Tier</th>
                           </>
                         )}

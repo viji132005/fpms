@@ -23,6 +23,7 @@ import {
   Square,
   Bookmark,
 } from 'lucide-react';
+import { PdfCanvasViewer } from '../components/PdfCanvasViewer.tsx';
 
 export const NotificationsView: React.FC = () => {
   const { user, department, notifications, refreshNotifications, setActiveTab, isMasterAdmin } = useAuth();
@@ -53,9 +54,67 @@ export const NotificationsView: React.FC = () => {
   // Document Preview Modal
   const [previewDoc, setPreviewDoc] = useState<{
     url: string;
+    renderUrl: string;
     name: string;
     title: string;
   } | null>(null);
+
+  const formatNotificationDateTime = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    return `${day}/${month}/${year} ${time}`;
+  };
+
+  const openDocPreview = (doc: { url: string; name?: string; title: string }) => {
+    let renderUrl = doc.url;
+    if (doc.url.startsWith('data:')) {
+      try {
+        const parts = doc.url.split(';base64,');
+        if (parts.length === 2) {
+          const isPdf = doc.name?.toLowerCase().endsWith('.pdf') || parts[0].includes('pdf');
+          const mime = isPdf ? 'application/pdf' : parts[0].replace('data:', '') || 'application/pdf';
+          const byteChars = atob(parts[1]);
+          const byteArrays = [];
+          for (let offset = 0; offset < byteChars.length; offset += 512) {
+            const slice = byteChars.slice(offset, offset + 512);
+            const byteNums = new Array(slice.length);
+            for (let i = 0; i < slice.length; i++) {
+              byteNums[i] = slice.charCodeAt(i);
+            }
+            byteArrays.push(new Uint8Array(byteNums));
+          }
+          const blob = new Blob(byteArrays, { type: mime });
+          renderUrl = URL.createObjectURL(blob);
+        }
+      } catch (err) {
+        console.warn('Could not generate blob URL for document:', err);
+      }
+    }
+    setPreviewDoc({
+      url: doc.url,
+      renderUrl,
+      name: doc.name || 'Official Document',
+      title: doc.title,
+    });
+  };
+
+  const closeDocPreview = () => {
+    if (previewDoc?.renderUrl && previewDoc.renderUrl.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(previewDoc.renderUrl);
+      } catch {
+        // ignore
+      }
+    }
+    setPreviewDoc(null);
+  };
 
   const handleMarkAsRead = async (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -171,7 +230,7 @@ export const NotificationsView: React.FC = () => {
   const handleNotificationClick = (notif: any) => {
     handleMarkAsRead(notif.id);
     if (notif.attachmentUrl) {
-      setPreviewDoc({
+      openDocPreview({
         url: notif.attachmentUrl,
         name: notif.attachmentName || 'Circular Document',
         title: notif.title,
@@ -554,7 +613,7 @@ export const NotificationsView: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => {
-                            setPreviewDoc({
+                            openDocPreview({
                               url: notif.attachmentUrl!,
                               name: notif.attachmentName || 'Circular Document',
                               title: notif.title,
@@ -570,7 +629,7 @@ export const NotificationsView: React.FC = () => {
 
                     <div className="text-[10px] text-slate-400 font-mono flex items-center gap-2 pt-1 flex-wrap">
                       <span>
-                        {notif.createdAt?.split('T')[0]} {notif.createdAt?.split('T')[1]?.substring(0, 5)}
+                        {formatNotificationDateTime(notif.createdAt)}
                       </span>
                       {notif.actorName && <span>· Circulated by {notif.actorName}</span>}
                     </div>
@@ -814,47 +873,48 @@ export const NotificationsView: React.FC = () => {
       {/* DOCUMENT PREVIEW MODAL */}
       {previewDoc && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-2xl w-full p-5 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-3xl w-full p-5 animate-in zoom-in-95 max-h-[92vh] flex flex-col">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3 shrink-0">
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-[#7B1113]" />
-                <h3 className="text-xs font-bold text-slate-900 truncate max-w-md">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="w-4 h-4 text-[#7B1113] shrink-0" />
+                <h3 className="text-xs font-bold text-slate-900 truncate">
                   {previewDoc.title} — ({previewDoc.name})
                 </h3>
               </div>
-              <button
-                onClick={() => setPreviewDoc(null)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={previewDoc.renderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 text-[11px] font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg flex items-center gap-1 transition-colors"
+                  title="Open document in a separate browser tab"
+                >
+                  <Eye className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Open Full View</span>
+                </a>
+                <button
+                  onClick={closeDocPreview}
+                  className="text-slate-400 hover:text-slate-600 p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-auto bg-slate-100 rounded-lg p-2 flex items-center justify-center min-h-[300px]">
+            <div className="flex-1 overflow-auto bg-slate-100 rounded-lg p-2 flex items-center justify-center min-h-[350px]">
               {isImageFile(previewDoc.url, previewDoc.name) ? (
                 <img
-                  src={previewDoc.url}
+                  src={previewDoc.renderUrl}
                   alt={previewDoc.name}
-                  className="max-h-[60vh] max-w-full object-contain rounded"
-                />
-              ) : previewDoc.url.startsWith('data:application/pdf') ? (
-                <iframe
-                  src={previewDoc.url}
-                  title={previewDoc.name}
-                  className="w-full h-[60vh] rounded border border-slate-300"
+                  className="max-h-[65vh] max-w-full object-contain rounded shadow"
                 />
               ) : (
-                <div className="text-center p-6 space-y-2">
-                  <FileText className="w-12 h-12 text-slate-400 mx-auto" />
-                  <p className="text-xs font-semibold text-slate-700">{previewDoc.name}</p>
-                  <a
-                    href={previewDoc.url}
-                    download={previewDoc.name}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#7B1113] rounded-lg shadow-sm"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download Attachment</span>
-                  </a>
+                <div className="w-full h-[68vh] flex flex-col">
+                  <PdfCanvasViewer
+                    url={previewDoc.renderUrl}
+                    originalUrl={previewDoc.url}
+                    fileName={previewDoc.name}
+                  />
                 </div>
               )}
             </div>
@@ -873,7 +933,7 @@ export const NotificationsView: React.FC = () => {
                   <span>Download Document</span>
                 </a>
                 <button
-                  onClick={() => setPreviewDoc(null)}
+                  onClick={closeDocPreview}
                   className="px-4 py-1.5 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg"
                 >
                   Close

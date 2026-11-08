@@ -5,8 +5,8 @@ import {
   canPublishTimetable,
   generateAutomatedTimetableGrid,
   extractFacultyPersonalSchedule,
-  FacultyAssignment,
-  TimetableSlot,
+  type FacultyAssignment,
+  type TimetableSlot,
 } from './timetableValidation.ts';
 
 const mockAssignments: FacultyAssignment[] = [

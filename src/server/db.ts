@@ -187,15 +187,19 @@ export interface MentorAllocation {
   academicYear: string;
   studentYear: number;
   status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+  allocationMode?: 'LINEAR' | 'RANDOM';
   versionNumber: number;
   createdById: string;
   publishedAt?: string;
+  publishedById?: string;
+  publishedByName?: string;
   createdAt: string;
   groups: {
     mentorId: string;
     mentorName: string;
     staffId: string;
     studentIds: string[];
+    students?: any[];
   }[];
 }
 
@@ -463,15 +467,22 @@ class DatabaseManager {
       data.structuredTimetables = [];
     }
 
-    // Strict requirement: in master admin remove all department excluding information science
-    data.departments = (data.departments || []).filter(
-      (d) => d.id === 'dept-ise'
-    );
-    data.users = (data.users || []).filter(
-      (u) =>
-        !u.departmentId ||
-        u.departmentId === 'dept-ise'
-    );
+    // Ensure departments list exists and includes default dept-ise
+    if (!data.departments) {
+      data.departments = [];
+    }
+    const hasIse = data.departments.some((d) => d.id === 'dept-ise');
+    if (!hasIse) {
+      data.departments.push({
+        id: 'dept-ise',
+        code: 'ISE',
+        name: 'Information Science & Engineering',
+        description: 'Department of Information Science & Engineering at Maharaja Institute of Technology Mysore',
+        hodId: 'user-hod-ise',
+        active: true,
+        createdAt: now,
+      });
+    }
     // Strict requirement: Admin credentials are for login/operations only, NOT staff records
     data.staffProfiles = (data.staffProfiles || []).filter(
       (sp) =>
@@ -607,6 +618,16 @@ class DatabaseManager {
     // Seed 6th sem timetables if not present
     if (!data.structuredTimetables.some((t) => t.semester === '6th Semester')) {
       data.structuredTimetables.push(...getInitial6thSemTimetables());
+    }
+
+    // Seed 4th sem (Year 2) timetables if not present
+    if (!data.structuredTimetables.some((t) => t.studentYear === 2 && t.status === 'PUBLISHED')) {
+      data.structuredTimetables.push(...this.generateYear2Timetables());
+    }
+
+    // Seed 8th sem (Year 4) timetables if not present
+    if (!data.structuredTimetables.some((t) => t.studentYear === 4 && t.status === 'PUBLISHED')) {
+      data.structuredTimetables.push(...this.generateYear4Timetables());
     }
   }
 
@@ -744,6 +765,152 @@ class DatabaseManager {
         updatedAt: now,
       },
     ];
+  }
+
+  private generateYear2Timetables(): StructuredTimetable[] {
+    const now = new Date().toISOString();
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const periods = [
+      { index: 0, timeRange: '09:00 - 10:00' },
+      { index: 1, timeRange: '10:00 - 11:00' },
+      { index: 2, timeRange: '11:15 - 12:15' },
+      { index: 3, timeRange: '12:15 - 01:15' },
+      { index: 4, timeRange: '02:00 - 03:00' },
+      { index: 5, timeRange: '03:00 - 04:00' },
+      { index: 6, timeRange: '04:00 - 05:00' },
+    ];
+
+    const y2Assignments: FacultyAssignment[] = [
+      { id: 'fa-y2-1', courseCode: '21MAT41', courseTitle: 'Mathematical Foundations for Computing', facultyUserId: 'user-fac-amruth', facultyName: 'Prof. Amruth V', staffId: '', hoursPerWeek: 4, isLab: false, color: '#7B1113' },
+      { id: 'fa-y2-2', courseCode: '21CS42', courseTitle: 'Design and Analysis of Algorithms', facultyUserId: 'user-fac-ravi', facultyName: 'Dr. Ravi P', staffId: '', hoursPerWeek: 4, isLab: false, color: '#1e3a8a' },
+      { id: 'fa-y2-3', courseCode: '21CS43', courseTitle: 'Operating Systems', facultyUserId: 'user-fac-siddaraju', facultyName: 'Prof. Siddaraju M G', staffId: '', hoursPerWeek: 4, isLab: false, color: '#065f46' },
+      { id: 'fa-y2-4', courseCode: '21CSL46', courseTitle: 'Design and Analysis of Algorithms Lab', facultyUserId: 'user-fac-ravi', facultyName: 'Dr. Ravi P', staffId: '', hoursPerWeek: 3, isLab: true, color: '#c2410c' },
+    ];
+
+    return (['Section A', 'Section B'] as const).map((sec, secIdx) => {
+      const schedule: TimetableSlot[] = [];
+      days.forEach((day, dIdx) => {
+        periods.forEach((p, pIdx) => {
+          const assignIdx = (dIdx + pIdx + secIdx) % y2Assignments.length;
+          const a = pIdx < 5 ? y2Assignments[assignIdx] : null;
+          schedule.push({
+            day,
+            periodIndex: p.index,
+            timeRange: p.timeRange,
+            courseCode: a ? a.courseCode : '',
+            courseTitle: a ? a.courseTitle : '',
+            facultyUserId: a ? a.facultyUserId : '',
+            facultyName: a ? a.facultyName : '',
+            room: a?.isLab ? 'ISE Algorithm Design Lab' : `LH-20${1 + secIdx} (ISE 2nd Year)`,
+            isLab: a?.isLab || false,
+          });
+        });
+      });
+
+      return {
+        id: `st-dept-ise-y2-sem3-${sec.toLowerCase().replace(' ', '-')}`,
+        departmentId: 'dept-ise',
+        academicYear: '2026-27',
+        semester: '3rd Semester',
+        section: sec,
+        studentYear: 2,
+        title: `WEEKLY ACADEMIC CLASS TIMETABLE - 2026-27 ODD SEM - III SEMESTER ${sec.toUpperCase()}`,
+        roomNumber: `Room Number:- ${201 + secIdx}`,
+        classTeacher: secIdx === 0 ? 'Prof. Amruth V' : 'Dr. Ravi P',
+        status: 'PUBLISHED' as const,
+        isValidated: true,
+        version: 1,
+        isActive: true,
+        facultyAssignments: y2Assignments,
+        schedule,
+        subjectLegend: y2Assignments.map((a) => ({
+          code: a.courseCode,
+          title: a.courseTitle,
+          shortName: a.courseCode.substring(2),
+          facultyName: a.facultyName,
+          facultyInitials: a.facultyName.split(' ').map((n) => n[0]).join(''),
+        })),
+        validationReport: { isValid: true, checkedAt: now, conflicts: [], warnings: [] },
+        publishedAt: now,
+        publishedBy: 'ise.admin@mitmysore.in (Prof. K. S. Manjunath)',
+        retentionNote: 'Official MIT Mysore Odd Semester 2026-27 III Semester Timetable.',
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
+  }
+
+  private generateYear4Timetables(): StructuredTimetable[] {
+    const now = new Date().toISOString();
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const periods = [
+      { index: 0, timeRange: '09:00 - 10:00' },
+      { index: 1, timeRange: '10:00 - 11:00' },
+      { index: 2, timeRange: '11:15 - 12:15' },
+      { index: 3, timeRange: '12:15 - 01:15' },
+      { index: 4, timeRange: '02:00 - 03:00' },
+      { index: 5, timeRange: '03:00 - 04:00' },
+      { index: 6, timeRange: '04:00 - 05:00' },
+    ];
+
+    const y4Assignments: FacultyAssignment[] = [
+      { id: 'fa-y4-1', courseCode: '21IS81', courseTitle: 'Cloud Computing & Virtualization', facultyUserId: 'user-hod-ise', facultyName: 'Dr. Sharath Kumar Y H', staffId: '', hoursPerWeek: 4, isLab: false, color: '#5b21b6' },
+      { id: 'fa-y4-2', courseCode: '21IS82', courseTitle: 'Information and Cyber Security', facultyUserId: 'user-fac-bhavya', facultyName: 'Prof. Bhavya H D', staffId: '', hoursPerWeek: 4, isLab: false, color: '#7B1113' },
+      { id: 'fa-y4-3', courseCode: '21IS83', courseTitle: 'DevOps & Continuous Delivery', facultyUserId: 'user-fac-ganavi', facultyName: 'Prof. Ganavi N P', staffId: '', hoursPerWeek: 4, isLab: false, color: '#065f46' },
+      { id: 'fa-y4-4', courseCode: '21ISP84', courseTitle: 'Major Project Phase - II', facultyUserId: 'user-fac-siddaraju', facultyName: 'Prof. Siddaraju M G', staffId: '', hoursPerWeek: 6, isLab: true, color: '#c2410c' },
+    ];
+
+    return (['Section A', 'Section B'] as const).map((sec, secIdx) => {
+      const schedule: TimetableSlot[] = [];
+      days.forEach((day, dIdx) => {
+        periods.forEach((p, pIdx) => {
+          const assignIdx = (dIdx + pIdx + secIdx) % y4Assignments.length;
+          const a = pIdx < 5 ? y4Assignments[assignIdx] : null;
+          schedule.push({
+            day,
+            periodIndex: p.index,
+            timeRange: p.timeRange,
+            courseCode: a ? a.courseCode : '',
+            courseTitle: a ? a.courseTitle : '',
+            facultyUserId: a ? a.facultyUserId : '',
+            facultyName: a ? a.facultyName : '',
+            room: a?.isLab ? 'ISE Research & Project Lab' : `LH-40${1 + secIdx} (ISE Final Year)`,
+            isLab: a?.isLab || false,
+          });
+        });
+      });
+
+      return {
+        id: `st-dept-ise-y4-sem7-${sec.toLowerCase().replace(' ', '-')}`,
+        departmentId: 'dept-ise',
+        academicYear: '2026-27',
+        semester: '7th Semester',
+        section: sec,
+        studentYear: 4,
+        title: `WEEKLY ACADEMIC CLASS TIMETABLE - 2026-27 ODD SEM - VII SEMESTER ${sec.toUpperCase()}`,
+        roomNumber: `Room Number:- ${401 + secIdx}`,
+        classTeacher: secIdx === 0 ? 'Dr. Sharath Kumar Y H' : 'Prof. Bhavya H D',
+        status: 'PUBLISHED' as const,
+        isValidated: true,
+        version: 1,
+        isActive: true,
+        facultyAssignments: y4Assignments,
+        schedule,
+        subjectLegend: y4Assignments.map((a) => ({
+          code: a.courseCode,
+          title: a.courseTitle,
+          shortName: a.courseCode.substring(2),
+          facultyName: a.facultyName,
+          facultyInitials: a.facultyName.split(' ').map((n) => n[0]).join(''),
+        })),
+        validationReport: { isValid: true, checkedAt: now, conflicts: [], warnings: [] },
+        publishedAt: now,
+        publishedBy: 'ise.admin@mitmysore.in (Prof. K. S. Manjunath)',
+        retentionNote: 'Official MIT Mysore Odd Semester 2026-27 VII Semester Timetable.',
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
   }
 
   public save(): void {

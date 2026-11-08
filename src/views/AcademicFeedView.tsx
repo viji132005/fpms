@@ -5,14 +5,11 @@ import { authFetch } from '../utils/api.ts';
 import {
   Rss,
   Plus,
-  Heart,
-  MessageSquare,
   Calendar,
   X,
   Upload,
   Globe,
   Lock,
-  Send,
   Trash2,
   ChevronLeft,
   ChevronRight,
@@ -37,10 +34,13 @@ export const AcademicFeedView: React.FC = () => {
     title: '',
     content: '',
     category: 'ACADEMIC_EVENT',
+    customCategory: '',
     eventDate: '',
     visibility: 'PUBLIC' as 'PUBLIC' | 'INSTITUTION' | 'PRIVATE',
     mediaUrls: [] as string[],
+    durationMode: 'PERMANENT' as 'PERMANENT' | 'DAYS' | 'CUSTOM',
     durationDays: 0,
+    customExpireDate: '',
     isPinned: false,
   });
 
@@ -57,14 +57,16 @@ export const AcademicFeedView: React.FC = () => {
     title: '',
     content: '',
     category: 'ACADEMIC_EVENT',
+    customCategory: '',
     eventDate: new Date().toISOString().split('T')[0],
     visibility: 'PUBLIC' as 'PUBLIC' | 'INSTITUTION' | 'PRIVATE',
     mediaUrls: [] as string[],
+    durationMode: 'PERMANENT' as 'PERMANENT' | 'DAYS' | 'CUSTOM',
     durationDays: 0, // 0 = Always Active
+    customExpireDate: '',
     isPinned: false,
   });
 
-  const [commentInput, setCommentInput] = useState<{ [postId: string]: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchPosts = () => {
@@ -142,15 +144,36 @@ export const AcademicFeedView: React.FC = () => {
         ? [post.mediaUrl]
         : [];
 
+    const standardCategories = [
+      'ACADEMIC_EVENT',
+      'RESEARCH_MILESTONE',
+      'FACULTY_ACHIEVEMENT',
+      'STUDENT_ACTIVITY',
+      'INSTITUTIONAL_NOTICE',
+    ];
+    const isCustomCat = !standardCategories.includes(post.category);
+
+    let durMode: 'PERMANENT' | 'DAYS' | 'CUSTOM' = 'PERMANENT';
+    let customExp = '';
+    if (post.expiresAt) {
+      durMode = 'CUSTOM';
+      customExp = post.expiresAt.split('T')[0];
+    } else if ((post as any).durationDays && (post as any).durationDays > 0) {
+      durMode = 'DAYS';
+    }
+
     setEditTarget(post);
     setEditForm({
       title: post.title,
       content: post.content,
-      category: post.category,
+      category: isCustomCat ? 'OTHER' : post.category,
+      customCategory: isCustomCat ? post.category : '',
       eventDate: post.eventDate,
-      visibility: post.visibility,
+      visibility: 'PUBLIC',
       mediaUrls: images,
+      durationMode: durMode,
       durationDays: (post as any).durationDays || 0,
+      customExpireDate: customExp,
       isPinned: !!(post as any).isPinned,
     });
   };
@@ -162,11 +185,33 @@ export const AcademicFeedView: React.FC = () => {
     setStatusMessage(null);
     setErrorMessage(null);
 
+    const finalCategory =
+      postForm.category === 'OTHER' && postForm.customCategory.trim()
+        ? postForm.customCategory.trim()
+        : postForm.category;
+
+    let payloadDuration = 0;
+    let payloadExpiresAt: string | undefined = undefined;
+
+    if (postForm.durationMode === 'DAYS') {
+      payloadDuration = postForm.durationDays;
+    } else if (postForm.durationMode === 'CUSTOM' && postForm.customExpireDate) {
+      payloadExpiresAt = new Date(`${postForm.customExpireDate}T23:59:59`).toISOString();
+    } else {
+      payloadDuration = 0; // Permanent
+    }
+
     try {
       const res = await authFetch('/api/feed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(postForm),
+        body: JSON.stringify({
+          ...postForm,
+          category: finalCategory,
+          visibility: 'PUBLIC', // All posts default to public gallery
+          durationDays: payloadDuration,
+          expiresAt: payloadExpiresAt,
+        }),
       });
       if (res.ok) {
         setShowCreateModal(false);
@@ -174,13 +219,16 @@ export const AcademicFeedView: React.FC = () => {
           title: '',
           content: '',
           category: 'ACADEMIC_EVENT',
+          customCategory: '',
           eventDate: new Date().toISOString().split('T')[0],
           visibility: 'PUBLIC',
           mediaUrls: [],
+          durationMode: 'PERMANENT',
           durationDays: 0,
+          customExpireDate: '',
           isPinned: false,
         });
-        setStatusMessage('Post published successfully to the academic feed and campus showcase!');
+        setStatusMessage('Post published successfully to the public showcase gallery!');
         fetchPosts();
       } else {
         const err = await res.json();
@@ -201,11 +249,33 @@ export const AcademicFeedView: React.FC = () => {
     setStatusMessage(null);
     setErrorMessage(null);
 
+    const finalCategory =
+      editForm.category === 'OTHER' && editForm.customCategory.trim()
+        ? editForm.customCategory.trim()
+        : editForm.category;
+
+    let payloadDuration = 0;
+    let payloadExpiresAt: string | undefined = undefined;
+
+    if (editForm.durationMode === 'DAYS') {
+      payloadDuration = editForm.durationDays;
+    } else if (editForm.durationMode === 'CUSTOM' && editForm.customExpireDate) {
+      payloadExpiresAt = new Date(`${editForm.customExpireDate}T23:59:59`).toISOString();
+    } else {
+      payloadDuration = 0; // Permanent
+    }
+
     try {
       const res = await authFetch(`/api/feed/${editTarget.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editForm),
+        body: JSON.stringify({
+          ...editForm,
+          category: finalCategory,
+          visibility: 'PUBLIC',
+          durationDays: payloadDuration,
+          expiresAt: payloadExpiresAt,
+        }),
       });
       if (res.ok) {
         setEditTarget(null);
@@ -238,34 +308,6 @@ export const AcademicFeedView: React.FC = () => {
       setErrorMessage('Failed to delete post.');
     } finally {
       setIsDeleting(false);
-    }
-  };
-
-  const handleLike = async (postId: string) => {
-    try {
-      const res = await authFetch(`/api/feed/${postId}/like`, { method: 'POST' });
-      if (res.ok) fetchPosts();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleAddComment = async (postId: string) => {
-    const text = commentInput[postId];
-    if (!text || text.trim().length === 0) return;
-
-    try {
-      const res = await authFetch(`/api/feed/${postId}/comment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      if (res.ok) {
-        setCommentInput((prev) => ({ ...prev, [postId]: '' }));
-        fetchPosts();
-      }
-    } catch (err) {
-      console.error(err);
     }
   };
 
@@ -349,7 +391,6 @@ export const AcademicFeedView: React.FC = () => {
                 ? [post.mediaUrl]
                 : [];
             const slideIdx = activeSlide[post.id] || 0;
-            const isLiked = user && post.likes.includes(user.id);
             const canManage =
               user?.id === post.authorUserId ||
               user?.role === 'ADMIN' ||
@@ -485,65 +526,17 @@ export const AcademicFeedView: React.FC = () => {
                   )}
                 </div>
 
-                {/* Post Footer & Social */}
+                {/* Post Footer */}
                 <div className="px-4 py-2.5 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={() => handleLike(post.id)}
-                      className={`flex items-center gap-1.5 font-medium transition-colors ${
-                        isLiked ? 'text-[#7B1113]' : 'hover:text-slate-800'
-                      }`}
-                    >
-                      <Heart className={`w-4 h-4 ${isLiked ? 'fill-current' : ''}`} />
-                      <span>{post.likes.length}</span>
-                    </button>
-
-                    <div className="flex items-center gap-1.5">
-                      <MessageSquare className="w-4 h-4" />
-                      <span>{post.comments.length}</span>
-                    </div>
+                  <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#7B1113]"></span>
+                    <span>Institutional Communication</span>
                   </div>
 
-                  <div className="flex items-center gap-1 text-[11px]">
+                  <div className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
                     <Calendar className="w-3.5 h-3.5 text-slate-400" />
                     <span>Event Date: {post.eventDate}</span>
                   </div>
-                </div>
-
-                {/* Comments Section */}
-                {post.comments.length > 0 && (
-                  <div className="p-4 bg-slate-50/40 border-t border-slate-100 space-y-2">
-                    {post.comments.map((comment) => (
-                      <div key={comment.id} className="text-xs">
-                        <span className="font-semibold text-slate-800 mr-2">
-                          {comment.userName}:
-                        </span>
-                        <span className="text-slate-600">{comment.text}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Add Comment Input */}
-                <div className="p-3 border-t border-slate-100 flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={commentInput[post.id] || ''}
-                    onChange={(e) =>
-                      setCommentInput({ ...commentInput, [post.id]: e.target.value })
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddComment(post.id);
-                    }}
-                    placeholder="Write a comment..."
-                    className="flex-1 px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  />
-                  <button
-                    onClick={() => handleAddComment(post.id)}
-                    className="p-1.5 text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg transition-colors"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               </div>
             );
@@ -581,7 +574,7 @@ export const AcademicFeedView: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Category</label>
                   <select
@@ -594,30 +587,20 @@ export const AcademicFeedView: React.FC = () => {
                     <option value="FACULTY_ACHIEVEMENT">Faculty Achievement</option>
                     <option value="STUDENT_ACTIVITY">Student Activity</option>
                     <option value="INSTITUTIONAL_NOTICE">Department Notice</option>
+                    <option value="OTHER">Custom Category (Write Own)...</option>
                   </select>
+                  {postForm.category === 'OTHER' && (
+                    <input
+                      type="text"
+                      required
+                      value={postForm.customCategory}
+                      onChange={(e) => setPostForm({ ...postForm, customCategory: e.target.value })}
+                      placeholder="Enter custom category name..."
+                      className="w-full mt-2 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113] text-xs"
+                    />
+                  )}
                 </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Display Duration / Expiry
-                  </label>
-                  <select
-                    value={postForm.durationDays}
-                    onChange={(e) =>
-                      setPostForm({ ...postForm, durationDays: Number(e.target.value) })
-                    }
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  >
-                    <option value={0}>Always Active (Permanent Default)</option>
-                    <option value={3}>Active for 3 Days (Brief Activity)</option>
-                    <option value={7}>Active for 7 Days (1 Week)</option>
-                    <option value={15}>Active for 15 Days (Fortnight)</option>
-                    <option value={30}>Active for 30 Days (1 Month)</option>
-                    <option value={60}>Active for 60 Days (2 Months)</option>
-                  </select>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Event Date</label>
                   <input
@@ -628,24 +611,89 @@ export const AcademicFeedView: React.FC = () => {
                     className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
                   />
                 </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Audience Visibility</label>
-                  <select
-                    value={postForm.visibility}
-                    onChange={(e) => setPostForm({ ...postForm, visibility: e.target.value as any })}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  >
-                    <option value="PUBLIC">Public (Campus-Wide & External Showcase)</option>
-                    <option value="INSTITUTION">Internal Campus Only (Staff, HODs & Faculty)</option>
-                  </select>
-                </div>
               </div>
 
-              {/* Explanatory note for visibility */}
-              <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-[11px] text-slate-600 space-y-1">
-                <p className="font-semibold text-slate-700">Audience Visibility Guide:</p>
-                <p>• <strong>Public:</strong> Shows on the public landing page gallery for students, recruiters, and external visitors.</p>
-                <p>• <strong>Internal Campus:</strong> Visible only inside FPMS after logging in as authorized staff or faculty.</p>
+              {/* Display Duration & Expiry */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <label className="block font-semibold text-slate-700 text-xs">
+                  Display Duration / Expiry Policy
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPostForm({ ...postForm, durationMode: 'PERMANENT', durationDays: 0 })}
+                    className={`py-1.5 px-2 rounded-lg border text-center transition-all cursor-pointer text-xs font-semibold ${
+                      postForm.durationMode === 'PERMANENT'
+                        ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    Permanent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPostForm({
+                        ...postForm,
+                        durationMode: 'DAYS',
+                        durationDays: postForm.durationDays > 0 ? postForm.durationDays : 7,
+                      })
+                    }
+                    className={`py-1.5 px-2 rounded-lg border text-center transition-all cursor-pointer text-xs font-semibold ${
+                      postForm.durationMode === 'DAYS'
+                        ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    Fixed Days
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPostForm({ ...postForm, durationMode: 'CUSTOM' })}
+                    className={`py-1.5 px-2 rounded-lg border text-center transition-all cursor-pointer text-xs font-semibold ${
+                      postForm.durationMode === 'CUSTOM'
+                        ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    Custom Date
+                  </button>
+                </div>
+
+                {postForm.durationMode === 'DAYS' && (
+                  <div className="pt-1">
+                    <select
+                      value={postForm.durationDays}
+                      onChange={(e) =>
+                        setPostForm({ ...postForm, durationDays: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113] bg-white text-xs"
+                    >
+                      <option value={3}>Active for 3 Days</option>
+                      <option value={7}>Active for 7 Days (1 Week)</option>
+                      <option value={15}>Active for 15 Days (Fortnight)</option>
+                      <option value={30}>Active for 30 Days (1 Month)</option>
+                      <option value={60}>Active for 60 Days (2 Months)</option>
+                      <option value={90}>Active for 90 Days (1 Quarter)</option>
+                    </select>
+                  </div>
+                )}
+
+                {postForm.durationMode === 'CUSTOM' && (
+                  <div className="pt-1">
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                      Select Specific Expiry Date:
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      min={new Date().toISOString().split('T')[0]}
+                      value={postForm.customExpireDate}
+                      onChange={(e) => setPostForm({ ...postForm, customExpireDate: e.target.value })}
+                      className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113] bg-white text-xs"
+                    />
+                  </div>
+                )}
               </div>
 
               <div>
@@ -754,7 +802,7 @@ export const AcademicFeedView: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Category</label>
                   <select
@@ -767,30 +815,20 @@ export const AcademicFeedView: React.FC = () => {
                     <option value="FACULTY_ACHIEVEMENT">Faculty Achievement</option>
                     <option value="STUDENT_ACTIVITY">Student Activity</option>
                     <option value="INSTITUTIONAL_NOTICE">Department Notice</option>
+                    <option value="OTHER">Custom Category (Write Own)...</option>
                   </select>
+                  {editForm.category === 'OTHER' && (
+                    <input
+                      type="text"
+                      required
+                      value={editForm.customCategory}
+                      onChange={(e) => setEditForm({ ...editForm, customCategory: e.target.value })}
+                      placeholder="Enter custom category name..."
+                      className="w-full mt-2 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113] text-xs"
+                    />
+                  )}
                 </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Display Duration / Expiry
-                  </label>
-                  <select
-                    value={editForm.durationDays}
-                    onChange={(e) =>
-                      setEditForm({ ...editForm, durationDays: Number(e.target.value) })
-                    }
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  >
-                    <option value={0}>Always Active (Permanent Default)</option>
-                    <option value={3}>Active for 3 Days (Brief Activity)</option>
-                    <option value={7}>Active for 7 Days (1 Week)</option>
-                    <option value={15}>Active for 15 Days (Fortnight)</option>
-                    <option value={30}>Active for 30 Days (1 Month)</option>
-                    <option value={60}>Active for 60 Days (2 Months)</option>
-                  </select>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Event Date</label>
                   <input
@@ -801,24 +839,89 @@ export const AcademicFeedView: React.FC = () => {
                     className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
                   />
                 </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Audience Visibility</label>
-                  <select
-                    value={editForm.visibility}
-                    onChange={(e) => setEditForm({ ...editForm, visibility: e.target.value as any })}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
-                  >
-                    <option value="PUBLIC">Public (Campus-Wide & External Showcase)</option>
-                    <option value="INSTITUTION">Internal Campus Only (Staff, HODs & Faculty)</option>
-                  </select>
-                </div>
               </div>
 
-              {/* Explanatory note for visibility */}
-              <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-[11px] text-slate-600 space-y-1">
-                <p className="font-semibold text-slate-700">Audience Visibility Guide:</p>
-                <p>• <strong>Public:</strong> Shows on the public landing page gallery for students, recruiters, and external visitors.</p>
-                <p>• <strong>Internal Campus:</strong> Visible only inside FPMS after logging in as authorized staff or faculty.</p>
+              {/* Display Duration & Expiry */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <label className="block font-semibold text-slate-700 text-xs">
+                  Display Duration / Expiry Policy
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditForm({ ...editForm, durationMode: 'PERMANENT', durationDays: 0 })}
+                    className={`py-1.5 px-2 rounded-lg border text-center transition-all cursor-pointer text-xs font-semibold ${
+                      editForm.durationMode === 'PERMANENT'
+                        ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    Permanent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditForm({
+                        ...editForm,
+                        durationMode: 'DAYS',
+                        durationDays: editForm.durationDays > 0 ? editForm.durationDays : 7,
+                      })
+                    }
+                    className={`py-1.5 px-2 rounded-lg border text-center transition-all cursor-pointer text-xs font-semibold ${
+                      editForm.durationMode === 'DAYS'
+                        ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    Fixed Days
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditForm({ ...editForm, durationMode: 'CUSTOM' })}
+                    className={`py-1.5 px-2 rounded-lg border text-center transition-all cursor-pointer text-xs font-semibold ${
+                      editForm.durationMode === 'CUSTOM'
+                        ? 'bg-[#7B1113] text-white border-[#7B1113] shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    Custom Date
+                  </button>
+                </div>
+
+                {editForm.durationMode === 'DAYS' && (
+                  <div className="pt-1">
+                    <select
+                      value={editForm.durationDays}
+                      onChange={(e) =>
+                        setEditForm({ ...editForm, durationDays: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113] bg-white text-xs"
+                    >
+                      <option value={3}>Active for 3 Days</option>
+                      <option value={7}>Active for 7 Days (1 Week)</option>
+                      <option value={15}>Active for 15 Days (Fortnight)</option>
+                      <option value={30}>Active for 30 Days (1 Month)</option>
+                      <option value={60}>Active for 60 Days (2 Months)</option>
+                      <option value={90}>Active for 90 Days (1 Quarter)</option>
+                    </select>
+                  </div>
+                )}
+
+                {editForm.durationMode === 'CUSTOM' && (
+                  <div className="pt-1">
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                      Select Specific Expiry Date:
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      min={new Date().toISOString().split('T')[0]}
+                      value={editForm.customExpireDate}
+                      onChange={(e) => setEditForm({ ...editForm, customExpireDate: e.target.value })}
+                      className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113] bg-white text-xs"
+                    />
+                  </div>
+                )}
               </div>
 
               <div>

@@ -222,7 +222,18 @@ export const Navbar: React.FC<NavbarProps> = ({ onSignInClick }) => {
                               </p>
 
                               <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
-                                <span>{notif.createdAt?.split('T')[0]}</span>
+                                <span>
+                                  {(() => {
+                                    if (!notif.createdAt) return '';
+                                    const d = new Date(notif.createdAt);
+                                    if (isNaN(d.getTime())) return notif.createdAt;
+                                    const day = String(d.getDate()).padStart(2, '0');
+                                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                                    const yr = d.getFullYear();
+                                    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+                                    return `${day}/${month}/${yr} ${time}`;
+                                  })()}
+                                </span>
                                 {notif.attachmentUrl && (
                                   <span className="inline-flex items-center gap-0.5 text-emerald-700 bg-emerald-50 px-1 rounded font-medium">
                                     <Download className="w-2.5 h-2.5" /> Doc

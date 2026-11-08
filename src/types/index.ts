@@ -192,12 +192,15 @@ export interface MentorAllocation {
   versionNumber: number;
   createdById: string;
   publishedAt?: string;
+  publishedByName?: string;
   createdAt: string;
+  allocationMode?: 'LINEAR' | 'RANDOM';
   groups: {
     mentorId: string;
     mentorName: string;
     staffId: string;
     studentIds: string[];
+    students?: any[];
   }[];
 }
 
@@ -390,7 +393,7 @@ export interface AllocatedStudent {
   fullName: string;
   currentYear: number;
   currentSemester: number;
-  performanceMetric?: 'CGPA' | 'SGPA' | null;
+  performanceMetric?: 'CGPA' | 'SGPA' | 'CGPA/SGPA' | string | null;
   performanceValue?: number | null;
   bandId?: string | null;
   bandName?: string | null;
@@ -408,7 +411,7 @@ export interface StudentSectionAllocationRun {
   title: string;
   status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   method: 'RANDOM' | 'PERFORMANCE';
-  performanceMetric?: 'CGPA' | 'SGPA' | null;
+  performanceMetric?: 'CGPA' | 'SGPA' | 'CGPA/SGPA' | string | null;
   sgpaSemester?: number | null;
   sgpaAcademicYear?: string | null;
   randomSeed: string;
