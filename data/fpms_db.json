@@ -266,7 +266,10 @@
       "specialization": "Artificial Intelligence, Pattern Recognition, Computer Vision",
       "isTeachingFaculty": true,
       "isMentorEligible": true,
-      "bio": "Head of Information Science and Engineering with over 18 years of academic and research leadership."
+      "bio": "Head of Information Science and Engineering with over 18 years of academic and research leadership.",
+      "profilePhotoUrl": "",
+      "cvUrl": "",
+      "isProfileRegistered": true
     },
     {
       "id": "sp-fac-gururaja",
@@ -6296,6 +6299,198 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1794237883301-qnyt",
+      "actorUserId": "user-hod-ise",
+      "actorEmail": "hod.ise@mitmysore.in",
+      "actorRole": "HOD",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-hod-ise",
+      "details": "User hod.ise@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T15:24:43.302Z"
+    },
+    {
+      "id": "log-1794236197872-9uor",
+      "actorUserId": "user-hod-ise",
+      "actorEmail": "hod.ise@mitmysore.in",
+      "actorRole": "HOD",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-hod-ise",
+      "details": "User hod.ise@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T14:56:37.872Z"
+    },
+    {
+      "id": "log-1794236164125-kr4t",
+      "actorUserId": "user-hod-ise",
+      "actorEmail": "hod.ise@mitmysore.in",
+      "actorRole": "HOD",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-hod-ise",
+      "details": "User hod.ise@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T14:56:04.125Z"
+    },
+    {
+      "id": "log-1794236139825-9fj5",
+      "actorUserId": "user-hod-ise",
+      "actorEmail": "hod.ise@mitmysore.in",
+      "actorRole": "HOD",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-hod-ise",
+      "details": "User hod.ise@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T14:55:39.825Z"
+    },
+    {
+      "id": "log-1794236120544-2er5",
+      "actorUserId": "user-hod-ise",
+      "actorEmail": "hod.ise@mitmysore.in",
+      "actorRole": "HOD",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-hod-ise",
+      "details": "User hod.ise@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T14:55:20.544Z"
+    },
+    {
+      "id": "log-1794235334360-0i7b",
+      "actorUserId": "user-ise-admin",
+      "actorEmail": "ise.admin@mitmysore.in",
+      "actorRole": "ADMIN",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-ise-admin",
+      "details": "User ise.admin@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T14:42:14.360Z"
+    },
+    {
+      "id": "log-1794221892867-vlpa",
+      "actorUserId": "user-ise-admin",
+      "actorEmail": "ise.admin@mitmysore.in",
+      "actorRole": "ADMIN",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-ise-admin",
+      "details": "User ise.admin@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T10:58:12.867Z"
+    },
+    {
+      "id": "log-1794220978760-ofdd",
+      "actorUserId": "user-ise-admin",
+      "actorEmail": "ise.admin@mitmysore.in",
+      "actorRole": "ADMIN",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-ise-admin",
+      "details": "User ise.admin@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T10:42:58.761Z"
+    },
+    {
+      "id": "log-1794219517585-owlg",
+      "actorUserId": "user-ise-admin",
+      "actorEmail": "ise.admin@mitmysore.in",
+      "actorRole": "ADMIN",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-ise-admin",
+      "details": "User ise.admin@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T10:18:37.585Z"
+    },
+    {
+      "id": "log-1794218582170-n2uc",
+      "actorUserId": "user-hod-ise",
+      "actorEmail": "hod.ise@mitmysore.in",
+      "actorRole": "HOD",
+      "action": "UPDATE_STAFF",
+      "targetEntity": "STAFF",
+      "targetId": "user-hod-ise",
+      "details": "Updated profile for Dr. Sharath Kumar Y H.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T10:03:02.170Z"
+    },
+    {
+      "id": "log-1794218572730-9m75",
+      "actorUserId": "user-hod-ise",
+      "actorEmail": "hod.ise@mitmysore.in",
+      "actorRole": "HOD",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-hod-ise",
+      "details": "User hod.ise@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T10:02:52.730Z"
+    },
+    {
+      "id": "log-1794217658287-qx1g",
+      "actorUserId": "user-fac-gururaja",
+      "actorEmail": "gururaja.ise@mitmysore.in",
+      "actorRole": "FACULTY",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-fac-gururaja",
+      "details": "User gururaja.ise@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T09:47:38.287Z"
+    },
+    {
+      "id": "log-1794217580643-wyxp",
+      "actorUserId": "user-fac-gururaja",
+      "actorEmail": "gururaja.ise@mitmysore.in",
+      "actorRole": "FACULTY",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-fac-gururaja",
+      "details": "User gururaja.ise@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T09:46:20.643Z"
+    },
+    {
+      "id": "log-1794216573203-6zi6",
+      "actorUserId": "user-hod-ise",
+      "actorEmail": "hod.ise@mitmysore.in",
+      "actorRole": "HOD",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-hod-ise",
+      "details": "User hod.ise@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T09:29:33.203Z"
+    },
+    {
+      "id": "log-1794212497389-08ya",
+      "actorUserId": "user-ise-admin",
+      "actorEmail": "ise.admin@mitmysore.in",
+      "actorRole": "ADMIN",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-ise-admin",
+      "details": "User ise.admin@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T08:21:37.389Z"
+    },
+    {
+      "id": "log-1794212406675-h7wl",
+      "actorUserId": "user-hod-ise",
+      "actorEmail": "hod.ise@mitmysore.in",
+      "actorRole": "HOD",
+      "action": "USER_LOGIN",
+      "targetEntity": "USER",
+      "targetId": "user-hod-ise",
+      "details": "User hod.ise@mitmysore.in signed in successfully.",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-11-09T08:20:06.675Z"
+    },
     {
       "id": "log-1794161223201-kk67",
       "actorUserId": "user-fac-gururaja",
@@ -17466,6 +17661,29 @@
   "customPortfolioCategories": {
     "user-fac-gururaja": [
       "Consultancy Projects"
+    ],
+    "user-hod-ise": [
+      "Research Publications",
+      "Patents & Intellectual Property",
+      "Faculty Development Programs (FDP)",
+      "Workshops & Seminars",
+      "Conference Papers",
+      "Professional Certifications",
+      "Funded Research Projects",
+      "Honors & Awards",
+      "Book Chapters & Monographs"
+    ],
+    "user-ise-admin": [
+      "Research Publications",
+      "Patents & Intellectual Property",
+      "Faculty Development Programs (FDP)",
+      "Workshops & Seminars",
+      "Conference Papers",
+      "Professional Certifications",
+      "Funded Research Projects",
+      "Honors & Awards",
+      "Book Chapters & Monographs",
+      "Consultancy & Industry Projects"
     ]
   }
 }

@@ -19,12 +19,20 @@ import {
   FileText,
   Download,
 } from 'lucide-react';
+import { FacultyRegistrationModal } from '../components/FacultyRegistrationModal.tsx';
 
 export const AdminDashboard: React.FC = () => {
-  const { department: contextDept } = useAuth();
+  const { department: contextDept, user, profile } = useAuth();
   const [metrics, setMetrics] = useState<any>(null);
   const [department, setDepartment] = useState<Department | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [showRegistrationModal, setShowRegistrationModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (user?.role === 'HOD' && profile && !profile.isProfileRegistered) {
+      setShowRegistrationModal(true);
+    }
+  }, [user, profile]);
 
   // Student Drilldown Modal State
   const [selectedCohortYear, setSelectedCohortYear] = useState<number | string | null>(null);
@@ -209,32 +217,89 @@ export const AdminDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Dynamic Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded text-[11px] font-bold bg-[#7B1113] text-white">
-              Institutional Admin
-            </span>
-            <span className="text-xs text-slate-500 font-medium">· Dynamic Department Scope</span>
-          </div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight mt-1">
-            {deptInfo.name} ({deptInfo.code})
-          </h1>
-          <p className="text-xs text-slate-500">
-            Maharaja Institute of Technology, Mysore · Academic Assessment Cycle
-          </p>
-        </div>
+      {/* First-time Profile Registration Modal for HOD */}
+      {user?.role === 'HOD' && (
+        <FacultyRegistrationModal
+          isOpen={showRegistrationModal}
+          onSuccess={() => setShowRegistrationModal(false)}
+        />
+      )}
 
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-              Operating Department
+      {/* Top Welcome Banner: Same to same feature box for HOD as in faculty dashboard */}
+      {user?.role === 'HOD' ? (
+        <div className="bg-gradient-to-r from-slate-900 to-[#7B1113] rounded-2xl p-6 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+          <div>
+            <div className="text-xs font-semibold text-amber-300 uppercase tracking-wider flex items-center gap-2">
+              <span>{deptInfo.name} ({deptInfo.code})</span>
+              <span>•</span>
+              <span className="text-rose-200">Academic Year 2026-27</span>
+            </div>
+            <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight mt-1">
+              Welcome, {profile?.fullName || user?.email}
+            </h1>
+            <p className="text-xs text-rose-100 mt-1 max-w-xl">
+              {profile?.designation || 'Professor & Head of Department'} · {profile?.qualification || 'Ph.D, M.Tech'}
             </p>
-            <p className="text-sm font-bold text-slate-800 font-mono">{deptInfo.code}</p>
+            {/* Contact and Email only (hardcoded ID and account active removed) */}
+            <div className="mt-3 flex items-center gap-3 flex-wrap text-xs text-rose-100">
+              <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
+                <Mail className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span>{user?.email || (profile as any)?.email || 'hod.ise@mitmysore.in'}</span>
+              </span>
+              {profile?.phone && (
+                <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
+                  <Phone className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                  <span>{profile.phone}</span>
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Facebook / WhatsApp style DP frame on right (camera icon removed) */}
+          <div className="flex items-center gap-3 shrink-0 self-center sm:self-auto">
+            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full ring-4 ring-white/30 shadow-2xl overflow-hidden bg-slate-800 flex items-center justify-center">
+              {profile?.profilePhotoUrl ? (
+                <img
+                  src={profile.profilePhotoUrl}
+                  alt={profile.fullName}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-amber-500 to-rose-600 flex items-center justify-center text-white text-2xl font-black">
+                  {(profile?.fullName || user?.email || 'H').charAt(0).toUpperCase()}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        /* Dynamic Header for Admin */
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded text-[11px] font-bold bg-[#7B1113] text-white">
+                Institutional Admin
+              </span>
+              <span className="text-xs text-slate-500 font-medium">· Dynamic Department Scope</span>
+            </div>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight mt-1">
+              {deptInfo.name} ({deptInfo.code})
+            </h1>
+            <p className="text-xs text-slate-500">
+              Maharaja Institute of Technology, Mysore · Academic Assessment Cycle
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                Operating Department
+              </p>
+              <p className="text-sm font-bold text-slate-800 font-mono">{deptInfo.code}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Top Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

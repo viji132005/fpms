@@ -4013,6 +4013,19 @@ apiRouter.get(
   }
 );
 
+const DEFAULT_PORTFOLIO_CATEGORIES = [
+  'Research Publications',
+  'Patents & Intellectual Property',
+  'Faculty Development Programs (FDP)',
+  'Workshops & Seminars',
+  'Conference Papers',
+  'Professional Certifications',
+  'Funded Research Projects',
+  'Honors & Awards',
+  'Book Chapters & Monographs',
+  'Consultancy & Industry Projects',
+];
+
 apiRouter.get(
   '/portfolio/categories',
   authMiddleware,
@@ -4021,30 +4034,19 @@ apiRouter.get(
     const { facultyUserId } = req.query;
     const targetUserId = (facultyUserId as string) || req.user!.id;
 
-    const defaultCategories = [
-      'Research Publications',
-      'Patents & Intellectual Property',
-      'Faculty Development Programs (FDP)',
-      'Workshops & Seminars',
-      'Conference Papers',
-      'Professional Certifications',
-      'Funded Research Projects',
-      'Honors & Awards',
-      'Book Chapters & Monographs',
-      'Consultancy & Industry Projects',
-    ];
-
     if (!data.customPortfolioCategories) {
       data.customPortfolioCategories = {};
     }
 
-    const userCategories = data.customPortfolioCategories[targetUserId] || [];
-    const existingItemCats = data.portfolioItems
-      .filter((p) => p.facultyUserId === targetUserId)
-      .map((p) => p.category);
+    if (!data.customPortfolioCategories[targetUserId]) {
+      const existingItemCats = data.portfolioItems
+        .filter((p) => p.facultyUserId === targetUserId)
+        .map((p) => p.category);
+      data.customPortfolioCategories[targetUserId] = Array.from(new Set([...DEFAULT_PORTFOLIO_CATEGORIES, ...existingItemCats]));
+      db.save();
+    }
 
-    const merged = Array.from(new Set([...defaultCategories, ...userCategories, ...existingItemCats]));
-    return res.json(merged);
+    return res.json(data.customPortfolioCategories[targetUserId]);
   }
 );
 
@@ -4065,7 +4067,7 @@ apiRouter.post(
 
     const targetUserId = facultyUserId || req.user!.id;
     if (!data.customPortfolioCategories[targetUserId]) {
-      data.customPortfolioCategories[targetUserId] = [];
+      data.customPortfolioCategories[targetUserId] = [...DEFAULT_PORTFOLIO_CATEGORIES];
     }
 
     if (!data.customPortfolioCategories[targetUserId].includes(trimmed)) {
@@ -4074,6 +4076,43 @@ apiRouter.post(
     }
 
     return res.json({ success: true, category: trimmed, categories: data.customPortfolioCategories[targetUserId] });
+  }
+);
+
+apiRouter.delete(
+  '/portfolio/categories',
+  authMiddleware,
+  (req: AuthenticatedRequest, res: Response) => {
+    const { categoryName, facultyUserId } = req.body;
+    if (!categoryName) {
+      return res.status(400).json({ error: 'Category name is required.' });
+    }
+
+    const data = db.getData();
+    const targetUserId = facultyUserId || req.user!.id;
+
+    if (req.user!.role !== 'ADMIN' && targetUserId !== req.user!.id) {
+      return res.status(403).json({ error: 'Permission denied to delete category for another faculty.' });
+    }
+
+    if (!data.customPortfolioCategories) {
+      data.customPortfolioCategories = {};
+    }
+
+    if (!data.customPortfolioCategories[targetUserId]) {
+      data.customPortfolioCategories[targetUserId] = [...DEFAULT_PORTFOLIO_CATEGORIES];
+    }
+
+    data.customPortfolioCategories[targetUserId] = data.customPortfolioCategories[targetUserId].filter(
+      (c) => c.toLowerCase() !== String(categoryName).toLowerCase()
+    );
+
+    data.portfolioItems = data.portfolioItems.filter(
+      (item) => !(item.facultyUserId === targetUserId && item.category.toLowerCase() === String(categoryName).toLowerCase())
+    );
+
+    db.save();
+    return res.json({ success: true, message: `Category folder "${categoryName}" deleted.` });
   }
 );
 

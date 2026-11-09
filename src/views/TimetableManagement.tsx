@@ -1924,12 +1924,13 @@ export const TimetableManagement: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="text-right font-mono text-xs space-y-0.5">
-                      <div className="font-bold text-[#7B1113]">ACADEMIC YEAR {activeAcademicYear}</div>
-                      <div className="text-slate-600">
+                    <div className="text-right font-mono text-xs space-y-0.5 shrink-0 whitespace-nowrap">
+                      <div className="font-bold text-[#7B1113] whitespace-nowrap tracking-wide">
+                        ACADEMIC YEAR {activeAcademicYear}
+                      </div>
+                      <div className="text-slate-600 font-semibold whitespace-nowrap">
                         {selectedSemester % 2 === 0 ? 'EVEN SEMESTER' : 'ODD SEMESTER'}
                       </div>
-                      <div className="text-[10px] text-slate-500">VTU SCHEME 2022/2023</div>
                     </div>
                   </div>
 
@@ -2422,9 +2423,9 @@ export const TimetableManagement: React.FC = () => {
                                 </h4>
                               </div>
                             </div>
-                            <div className="text-right font-mono text-xs">
-                              <div className="font-bold text-[#7B1113]">ACADEMIC YEAR {activeRec.academicYear}</div>
-                              <div className="text-[11px] text-slate-600 font-semibold">{activeRec.semester}</div>
+                            <div className="text-right font-mono text-xs shrink-0 whitespace-nowrap">
+                              <div className="font-bold text-[#7B1113] whitespace-nowrap">ACADEMIC YEAR {activeRec.academicYear}</div>
+                              <div className="text-[11px] text-slate-600 font-semibold whitespace-nowrap">{activeRec.semester}</div>
                             </div>
                           </div>
 

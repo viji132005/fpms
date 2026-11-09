@@ -91,7 +91,7 @@ function MainApp() {
       case 'students':
         return <StudentManagement />;
       case 'section-allocation':
-        return <StudentSectionAllocationView />;
+        return user.role === 'ADMIN' ? <StudentSectionAllocationView /> : <AdminDashboard />;
       case 'mentor-allocation':
         return <MentorAllocationView />;
       case 'timetables':

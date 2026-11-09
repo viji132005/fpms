@@ -111,6 +111,7 @@ export const MentorStudentsView: React.FC = () => {
         departmentName: deptName,
         deptCode: deptCode,
         academicYear: mentees[0]?.academicYear || '2026-27',
+        studentYear: selectedYearFilter === 'ALL' ? 0 : Number(selectedYearFilter),
         groups: [group],
       });
 

@@ -345,6 +345,7 @@ export const MentorAllocationView: React.FC = () => {
         departmentName: deptName,
         deptCode: deptCode,
         academicYear: acadYear,
+        studentYear: yearNum,
         groups: groupsToExport,
       });
 
@@ -413,16 +414,6 @@ export const MentorAllocationView: React.FC = () => {
             <History className="w-4 h-4 text-[#7B1113]" />
             <span>Allocation Records ({allCommittedAllocations.length})</span>
           </button>
-          {activeDisplayGroups.length > 0 && (
-            <button
-              onClick={handleExportExcel}
-              className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl flex items-center gap-1.5 shadow-sm transition-colors"
-              title="Download Excel spreadsheet of student allocation"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-              <span>Export Excel</span>
-            </button>
-          )}
         </div>
       </div>
 

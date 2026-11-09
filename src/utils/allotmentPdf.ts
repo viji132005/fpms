@@ -21,6 +21,9 @@ export interface AllotmentPdfOptions {
   departmentName: string;
   deptCode: string;
   academicYear: string;
+  studentYear?: number;
+  yearLabel?: string;
+  title?: string;
   groups: AllotmentGroupData[];
   logoUrl?: string;
 }
@@ -55,9 +58,62 @@ export async function generateCollegeAllotmentPdf(options: AllotmentPdfOptions):
     departmentName,
     deptCode,
     academicYear,
+    studentYear,
+    yearLabel,
+    title,
     groups,
     logoUrl = '/assets/aistudio/mit_logo_e728531b.webp',
   } = options;
+
+  // Resolve dynamic title matching MIT Mysore college standard
+  let targetYearText = '';
+  if (title) {
+    targetYearText = title.trim();
+  } else if (yearLabel) {
+    const yl = yearLabel.trim().toLowerCase();
+    if (yl.includes('comb') || yl.includes('multi') || (yl.includes('2nd') && yl.includes('3rd'))) {
+      targetYearText = '2ND YEAR 3RD AND 4TH YEAR';
+    } else if (yl.includes('1st') || yl === '1') {
+      targetYearText = '1ST YEAR';
+    } else if (yl.includes('2nd') || yl === '2') {
+      targetYearText = '2ND YEAR';
+    } else if (yl.includes('3rd') || yl === '3') {
+      targetYearText = '3RD YEAR';
+    } else if (yl.includes('4th') || yl === '4') {
+      targetYearText = '4TH YEAR';
+    } else {
+      targetYearText = yearLabel.toUpperCase();
+    }
+  } else if (studentYear !== undefined) {
+    if (studentYear === 1) {
+      targetYearText = '1ST YEAR';
+    } else if (studentYear === 2) {
+      targetYearText = '2ND YEAR';
+    } else if (studentYear === 3) {
+      targetYearText = '3RD YEAR';
+    } else if (studentYear === 4) {
+      targetYearText = '4TH YEAR';
+    } else if (studentYear === 0) {
+      targetYearText = '2ND YEAR 3RD AND 4TH YEAR';
+    } else {
+      targetYearText = `YEAR ${studentYear}`;
+    }
+  } else {
+    // Check students present in groups
+    const distinctYears = Array.from(
+      new Set(groups.flatMap((g) => g.students.map((s) => s.currentYear).filter(Boolean)))
+    ) as number[];
+    if (distinctYears.length === 1) {
+      const y = distinctYears[0];
+      targetYearText = y === 1 ? '1ST YEAR' : y === 2 ? '2ND YEAR' : y === 3 ? '3RD YEAR' : y === 4 ? '4TH YEAR' : `YEAR ${y}`;
+    } else {
+      targetYearText = '2ND YEAR 3RD AND 4TH YEAR';
+    }
+  }
+
+  const headerTitle = targetYearText.toUpperCase().startsWith('MENTORS ALLOTMENT')
+    ? targetYearText.toUpperCase()
+    : `MENTORS ALLOTMENT FOR ${targetYearText.toUpperCase()}`;
 
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -123,7 +179,7 @@ export async function generateCollegeAllotmentPdf(options: AllotmentPdfOptions):
     docInstance.setFontSize(10);
     docInstance.setTextColor(15, 23, 42);
     docInstance.text(
-      `MENTORS ALLOTMENT FOR ACADEMIC YEAR ${academicYear}`,
+      headerTitle,
       pageWidth / 2,
       y + 1,
       { align: 'center' }

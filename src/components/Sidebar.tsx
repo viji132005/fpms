@@ -53,9 +53,9 @@ export const Sidebar: React.FC = () => {
   } else if (user.role === 'HOD') {
     items = [
       { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+      { id: 'profile', label: 'My Profile', icon: <UserCircle className="w-4 h-4" /> },
       { id: 'staff', label: 'Department Faculty', icon: <Users className="w-4 h-4" /> },
       { id: 'students', label: 'Student Management', icon: <GraduationCap className="w-4 h-4" /> },
-      { id: 'section-allocation', label: 'Section Allocation', icon: <SplitSquareVertical className="w-4 h-4" /> },
       { id: 'portfolio', label: 'Academic Portfolio', icon: <FolderGit2 className="w-4 h-4" /> },
       { id: 'timetables', label: 'Timetable', icon: <CalendarDays className="w-4 h-4" /> },
       { id: 'feed', label: 'Academic Feed', icon: <Rss className="w-4 h-4" /> },

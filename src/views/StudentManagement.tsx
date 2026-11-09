@@ -21,7 +21,14 @@ import {
   Phone,
   Mail,
   ShieldAlert,
+  FileText,
+  ClipboardList,
 } from 'lucide-react';
+import {
+  formatStudentExcelData,
+  generateStudentRosterPdf,
+  generateAttendanceFormPdf,
+} from '../utils/studentExportPdf.ts';
 
 export const StudentManagement: React.FC = () => {
   const { user, department } = useAuth();
@@ -41,6 +48,11 @@ export const StudentManagement: React.FC = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showPromotionModal, setShowPromotionModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportScope, setExportScope] = useState<'active' | 'all'>('active');
+  const [exportFormat, setExportFormat] = useState<'excel' | 'pdf' | 'attendance'>('excel');
+  const [attendanceEventName, setAttendanceEventName] = useState<string>('');
+  const [isExporting, setIsExporting] = useState(false);
 
   // In-app Delete Confirmation (replacing window.confirm)
   const [deleteTarget, setDeleteTarget] = useState<Student | null>(null);
@@ -97,6 +109,28 @@ export const StudentManagement: React.FC = () => {
     4: { count: 0, activeSem: 7 },
   });
   const [graduatedCount, setGraduatedCount] = useState<number>(0);
+
+  const activeRunningSem = typeof activeTab === 'number'
+    ? deptYearStats[activeTab]?.activeSem || (currentDeptCycle === 'EVEN' ? activeTab * 2 : activeTab * 2 - 1)
+    : null;
+
+  const selectedCohortYearLabel = exportScope === 'all'
+    ? 'All Batches'
+    : activeTab === 'graduated'
+    ? 'Graduated Alumni'
+    : activeTab === 1
+    ? '1st Year'
+    : activeTab === 2
+    ? '2nd Year'
+    : activeTab === 3
+    ? '3rd Year'
+    : '4th Year';
+
+  const selectedCohortSemLabel = exportScope === 'all'
+    ? 'All Semesters'
+    : activeTab === 'graduated'
+    ? 'Alumni'
+    : `Sem ${activeRunningSem}`;
 
   const fetchDeptStats = async () => {
     try {
@@ -376,41 +410,114 @@ export const StudentManagement: React.FC = () => {
     XLSX.writeFile(wb, `MIT_Mysore_${deptCode}_Year${targetYr}_Sem${targetSem}_Student_Template.xlsx`);
   };
 
-  const exportCurrentStudentRoster = (exportAll = false) => {
-    let exportUrl = `/api/students?departmentId=${encodeURIComponent(deptId)}&`;
-    if (!exportAll) {
-      if (activeTab === 'graduated') {
-        exportUrl += 'status=GRADUATED&';
-      } else {
-        exportUrl += `year=${activeTab}&`;
-      }
-    }
+  const handleOpenExportModal = (scope: 'active' | 'all' = 'active') => {
+    setExportScope(scope);
+    setShowExportModal(true);
+  };
 
-    authFetch(exportUrl)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data: Student[]) => {
-        const exportData = data.map((s, index) => ({
-          'Sl. No.': index + 1,
-          'USN': s.usn,
-          'Full Name': s.fullName,
-          'Current Semester': s.currentSemester ? `Semester ${s.currentSemester}` : `Year ${s.currentYear}`,
-          'Academic Year': s.status === 'GRADUATED' ? 'Graduated Alumni' : `Year ${s.currentYear}`,
-          'Section': s.section || 'Unallotted',
-          'Email': s.email,
-          'Student Phone': s.phone || 'N/A',
-          'Parent Phone': s.parentPhone || 'N/A',
-          'Status': s.status,
-        }));
+  const exportCurrentStudentRoster = (exportAll = false) => {
+    handleOpenExportModal(exportAll ? 'all' : 'active');
+  };
+
+  const handleExecuteExport = async () => {
+    setIsExporting(true);
+    try {
+      const isAll = exportScope === 'all';
+      let exportUrl = `/api/students?departmentId=${encodeURIComponent(deptId)}&`;
+      if (!isAll) {
+        if (activeTab === 'graduated') {
+          exportUrl += 'status=GRADUATED&';
+        } else {
+          exportUrl += `year=${activeTab}&`;
+        }
+      }
+
+      const res = await authFetch(exportUrl);
+      const data: Student[] = res.ok ? await res.json() : [];
+
+      const fileLabel = isAll
+        ? 'All_Cohorts_Including_Graduated'
+        : activeTab === 'graduated'
+        ? 'Graduated_Alumni'
+        : `Year_${activeTab}`;
+
+      const humanCohortLabel = isAll
+        ? 'All Department Cohorts (1st–4th Year & Graduated Alumni)'
+        : activeTab === 'graduated'
+        ? 'Graduated Alumni Batch'
+        : `${activeTab === 1 ? '1st' : activeTab === 2 ? '2nd' : activeTab === 3 ? '3rd' : '4th'} Year Students`;
+
+      const cohortYearLabel = isAll
+        ? 'All Batches'
+        : activeTab === 'graduated'
+        ? 'Graduated Alumni'
+        : activeTab === 1
+        ? '1st Year'
+        : activeTab === 2
+        ? '2nd Year'
+        : activeTab === 3
+        ? '3rd Year'
+        : '4th Year';
+
+      const cohortSemesterLabel = isAll
+        ? 'Sem 1 - 8'
+        : activeTab === 'graduated'
+        ? 'Alumni'
+        : activeTab === 1
+        ? 'Sem 1 & 2'
+        : activeTab === 2
+        ? 'Sem 3 & 4'
+        : activeTab === 3
+        ? 'Sem 5 & 6'
+        : 'Sem 7 & 8';
+
+      if (exportFormat === 'excel') {
+        const exportData = formatStudentExcelData(data);
         const ws = XLSX.utils.json_to_sheet(exportData);
+        ws['!cols'] = [
+          { wch: 8 },  // Sl No
+          { wch: 18 }, // USN
+          { wch: 28 }, // Full Name
+          { wch: 18 }, // Academic Year
+          { wch: 18 }, // Current Semester
+          { wch: 15 }, // Section
+          { wch: 32 }, // Email
+          { wch: 18 }, // Student Phone
+          { wch: 18 }, // Parent Phone
+        ];
         const wb = XLSX.utils.book_new();
-        const label = exportAll
-          ? 'All_Cohorts_Including_Graduated'
-          : activeTab === 'graduated'
-          ? 'Graduated_Alumni'
-          : `Year_${activeTab}`;
-        XLSX.utils.book_append_sheet(wb, ws, `Roster`);
-        XLSX.writeFile(wb, `MIT_Mysore_${deptCode}_${label}.xlsx`);
-      });
+        XLSX.utils.book_append_sheet(wb, ws, 'Student_Roster');
+        XLSX.writeFile(wb, `MIT_Mysore_${deptCode}_${fileLabel}.xlsx`);
+      } else if (exportFormat === 'attendance') {
+        const doc = generateAttendanceFormPdf(data, {
+          institutionName: 'Maharaja Institute of Technology Mysore',
+          departmentName: deptName,
+          deptCode: deptCode,
+          yearLabel: cohortYearLabel,
+          semLabel: selectedCohortSemLabel,
+          eventName: attendanceEventName.trim() || undefined,
+        });
+        doc.save(`MIT_Mysore_${deptCode}_${fileLabel}_Event_Attendance_Sheet.pdf`);
+      } else {
+        const doc = generateStudentRosterPdf(data, {
+          institutionName: 'Maharaja Institute of Technology Mysore',
+          departmentName: deptName,
+          deptCode: deptCode,
+          academicYear: '2026-27',
+          cohortYearLabel,
+          cohortSemesterLabel,
+          cohortLabel: humanCohortLabel,
+        });
+        doc.save(`MIT_Mysore_${deptCode}_${fileLabel}.pdf`);
+      }
+
+      setShowExportModal(false);
+    } catch (err) {
+      console.error('Failed to export student roster:', err);
+      setGeneralError('Failed to generate export file. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // Semester Progression & Promotion Preview
@@ -573,23 +680,16 @@ export const StudentManagement: React.FC = () => {
           </p>
         </div>
 
-        {/* Export Buttons */}
-        <div className="flex items-center gap-2 flex-wrap self-start">
+        {/* Export Button */}
+        <div className="flex items-center gap-2 self-start">
           <button
-            onClick={() => exportCurrentStudentRoster(false)}
-            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-sm flex items-center gap-1.5 transition-colors"
-            title="Download active view in Excel"
+            type="button"
+            onClick={() => handleOpenExportModal('active')}
+            className="px-3.5 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm flex items-center gap-2 transition-colors cursor-pointer"
+            title="Export student records in Excel or Official PDF circular"
           >
-            <Download className="w-4 h-4 text-emerald-600" />
-            <span>Export Active Tab</span>
-          </button>
-          <button
-            onClick={() => exportCurrentStudentRoster(true)}
-            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg shadow-sm flex items-center gap-1.5 transition-colors"
-            title="Download all cohorts including graduated alumni"
-          >
-            <Download className="w-4 h-4 text-emerald-700" />
-            <span>Export All Cohorts (Incl. Alumni)</span>
+            <Download className="w-4 h-4" />
+            <span>Export Student Records</span>
           </button>
         </div>
       </div>
@@ -1746,6 +1846,210 @@ export const StudentManagement: React.FC = () => {
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>{isClearingStudents ? 'Clearing Records...' : 'Yes, Clear All Students'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Format Selection Modal (Excel or PDF) */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 animate-in fade-in-50">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-50 text-[#7B1113] flex items-center justify-center border border-rose-200">
+                  <Download className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Export Student Records</h3>
+                  <p className="text-[11px] text-slate-500">Choose your preferred export format and scope</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Step 1: Scope Selection */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-2">1. Select Cohort Scope</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExportScope('active')}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      exportScope === 'active'
+                        ? 'border-[#7B1113] bg-rose-50/60 ring-1 ring-[#7B1113]'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <div className="font-bold text-slate-900 truncate">
+                      {activeTab === 'graduated' ? 'Graduated Alumni' : `Year ${activeTab} Cohort`}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      Active tab view ({students.length} students)
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setExportScope('all')}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      exportScope === 'all'
+                        ? 'border-[#7B1113] bg-rose-50/60 ring-1 ring-[#7B1113]'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <div className="font-bold text-slate-900">All Cohorts</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      Complete department directory
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 2: Format Selection */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-2">2. Select Download Format</label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {/* Excel Card */}
+                  <button
+                    type="button"
+                    onClick={() => setExportFormat('excel')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      exportFormat === 'excel'
+                        ? 'border-emerald-600 bg-emerald-50/60 ring-1 ring-emerald-600'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                      {exportFormat === 'excel' && (
+                        <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                      )}
+                    </div>
+                    <div className="font-bold text-slate-900">Excel (.xlsx)</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      Tabulated spreadsheet with clean column widths
+                    </div>
+                  </button>
+
+                  {/* PDF Card */}
+                  <button
+                    type="button"
+                    onClick={() => setExportFormat('pdf')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      exportFormat === 'pdf'
+                        ? 'border-[#7B1113] bg-rose-50/60 ring-1 ring-[#7B1113]'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <FileText className="w-5 h-5 text-[#7B1113]" />
+                      {exportFormat === 'pdf' && (
+                        <span className="w-2 h-2 rounded-full bg-[#7B1113]"></span>
+                      )}
+                    </div>
+                    <div className="font-bold text-slate-900">Official College Circular (.pdf)</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      Print-ready A4 Portrait circular with standard Year & Semester in header block
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Feature Option: Download Event Attendance Form */}
+              <div
+                onClick={() => setExportFormat('attendance')}
+                className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                  exportFormat === 'attendance'
+                    ? 'border-[#7B1113] bg-rose-50/60 ring-2 ring-[#7B1113]'
+                    : 'border-slate-200 hover:border-slate-300 bg-slate-50/70'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className={`p-2 rounded-lg shrink-0 ${
+                        exportFormat === 'attendance'
+                          ? 'bg-[#7B1113] text-white shadow-sm'
+                          : 'bg-white border border-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <ClipboardList className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-xs text-slate-900">
+                        Download Event Attendance Form (.pdf)
+                      </span>
+                    </div>
+                  </div>
+                  <div className="shrink-0">
+                    <span
+                      className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        exportFormat === 'attendance'
+                          ? 'border-[#7B1113] bg-[#7B1113]'
+                          : 'border-slate-300 bg-white'
+                      }`}
+                    >
+                      {exportFormat === 'attendance' && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Optional Event Name field when attendance is selected */}
+                {exportFormat === 'attendance' && (
+                  <div className="mt-3 pt-3 border-t border-rose-200/80">
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Event / Activity Title (Printed in Header):
+                    </label>
+                    <input
+                      type="text"
+                      value={attendanceEventName}
+                      onChange={(e) => setAttendanceEventName(e.target.value)}
+                      placeholder="e.g. Department Technical Seminar / Workshop / Guest Lecture"
+                      className="w-full px-2.5 py-1.5 bg-white border border-rose-300 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-4 mt-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="px-3.5 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isExporting}
+                onClick={handleExecuteExport}
+                className="px-4 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>
+                  {isExporting
+                    ? 'Preparing Download...'
+                    : exportFormat === 'attendance'
+                    ? 'Download Attendance Form (.pdf)'
+                    : exportFormat === 'excel'
+                    ? 'Download Excel (.xlsx)'
+                    : 'Download Official Circular (.pdf)'}
+                </span>
               </button>
             </div>
           </div>
