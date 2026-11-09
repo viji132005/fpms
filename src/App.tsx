@@ -83,7 +83,7 @@ function MainApp() {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return user.role === 'FACULTY' ? <FacultyDashboard /> : <AdminDashboard />;
+        return user.role === 'FACULTY' || user.role === 'NON_TEACHING' ? <FacultyDashboard /> : <AdminDashboard />;
       case 'staff':
         return <StaffManagement />;
       case 'departments':
@@ -114,7 +114,7 @@ function MainApp() {
       case 'profile':
         return <FacultyProfileView />;
       default:
-        return user.role === 'FACULTY' ? <FacultyDashboard /> : <AdminDashboard />;
+        return user.role === 'FACULTY' || user.role === 'NON_TEACHING' ? <FacultyDashboard /> : <AdminDashboard />;
     }
   };
 

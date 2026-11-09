@@ -240,18 +240,12 @@ export const AdminDashboard: React.FC = () => {
             <p className="text-xs text-rose-100 mt-1 max-w-xl">
               {profile?.designation || 'Professor & Head of Department'} · {profile?.qualification || 'Ph.D, M.Tech'}
             </p>
-            {/* Contact and Email only (hardcoded ID and account active removed) */}
+            {/* Email only */}
             <div className="mt-3 flex items-center gap-3 flex-wrap text-xs text-rose-100">
               <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
                 <Mail className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                 <span>{user?.email || (profile as any)?.email || 'hod.ise@mitmysore.in'}</span>
               </span>
-              {profile?.phone && (
-                <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
-                  <Phone className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                  <span>{profile.phone}</span>
-                </span>
-              )}
             </div>
           </div>
 
@@ -607,11 +601,10 @@ export const AdminDashboard: React.FC = () => {
                   <thead>
                     <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-600 bg-slate-50">
                       <th className="py-2.5 px-3 text-center w-12">Sl. No.</th>
-                      <th className="py-2.5 px-3">Staff Name & ID</th>
+                      <th className="py-2.5 px-3">Staff Name</th>
                       <th className="py-2.5 px-3">Designation</th>
                       <th className="py-2.5 px-3">Qualification</th>
                       <th className="py-2.5 px-3">Official Email</th>
-                      <th className="py-2.5 px-3">Phone</th>
                       <th className="py-2.5 px-3 text-right">Resume / CV</th>
                     </tr>
                   </thead>
@@ -623,15 +616,11 @@ export const AdminDashboard: React.FC = () => {
                         </td>
                         <td className="py-2.5 px-3">
                           <p className="font-semibold text-slate-900">{sp.fullName}</p>
-                          <p className="text-[10px] text-slate-500 font-mono">{sp.staffId}</p>
                         </td>
                         <td className="py-2.5 px-3 text-slate-800 font-medium">{sp.designation}</td>
                         <td className="py-2.5 px-3 text-slate-600">{sp.qualification || 'M.Tech'}</td>
                         <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
                           {sp.user?.email || '—'}
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-[11px] text-slate-700">
-                          {sp.phone || '—'}
                         </td>
                         <td className="py-2.5 px-3 text-right">
                           {sp.cvUrl ? (

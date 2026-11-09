@@ -31,8 +31,8 @@ export const FacultyDashboard: React.FC = () => {
   const [selectedMenteeYear, setSelectedMenteeYear] = useState<string>('ALL');
 
   useEffect(() => {
-    // Check if faculty profile needs first-time registration
-    if (user?.role === 'FACULTY' && profile && !profile.isProfileRegistered) {
+    // Check if faculty or non-teaching staff profile needs first-time registration
+    if ((user?.role === 'FACULTY' || user?.role === 'NON_TEACHING') && profile && !profile.isProfileRegistered) {
       setShowRegistrationModal(true);
     }
   }, [user, profile]);
@@ -93,18 +93,12 @@ export const FacultyDashboard: React.FC = () => {
           <p className="text-xs text-rose-100 mt-1 max-w-xl">
             {profile?.designation || 'Faculty'} · {profile?.qualification || 'Department Faculty'}
           </p>
-          {/* Contact and Email only (hardcoded ID and account active removed as requested) */}
+          {/* Email only */}
           <div className="mt-3 flex items-center gap-3 flex-wrap text-xs text-rose-100">
             <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
               <Mail className="w-3.5 h-3.5 text-amber-300 shrink-0" />
               <span>{user?.email || (profile as any)?.email || 'email@mitmysore.in'}</span>
             </span>
-            {profile?.phone && (
-              <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
-                <Phone className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                <span>{profile.phone}</span>
-              </span>
-            )}
           </div>
         </div>
 
@@ -145,24 +139,42 @@ export const FacultyDashboard: React.FC = () => {
           </p>
         </div>
 
-        {/* Assigned Mentees */}
-        <div
-          onClick={() => {
-            document.getElementById('dashboard-mentee-details')?.scrollIntoView({ behavior: 'smooth' });
-          }}
-          className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-[#7B1113] transition-all hover:-translate-y-0.5"
-        >
-          <div className="flex items-center justify-between text-slate-500 mb-1">
-            <span className="text-xs font-semibold text-slate-700">Assigned Student Mentees</span>
-            <Network className="w-4 h-4 text-emerald-600" />
+        {/* Assigned Mentees or Staff Profile */}
+        {user?.role === 'NON_TEACHING' ? (
+          <div
+            onClick={() => setActiveTab('profile')}
+            className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-[#7B1113] transition-all hover:-translate-y-0.5"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-1">
+              <span className="text-xs font-semibold text-slate-700">My Staff Profile</span>
+              <User className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div className="text-sm font-extrabold text-slate-900 mt-2">
+              {profile?.isProfileRegistered ? 'Dossier Registered' : 'Registration Pending'}
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Click to view and update official profile & CV
+            </p>
           </div>
-          <div className="text-2xl font-extrabold text-slate-900 tabular-nums">
-            {menteesList.length}
+        ) : (
+          <div
+            onClick={() => {
+              document.getElementById('dashboard-mentee-details')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-[#7B1113] transition-all hover:-translate-y-0.5"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-1">
+              <span className="text-xs font-semibold text-slate-700">Assigned Student Mentees</span>
+              <Network className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div className="text-2xl font-extrabold text-slate-900 tabular-nums">
+              {menteesList.length}
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              {menteesList.length > 0 ? 'Click to view year-wise breakdown below' : 'Awaiting admin cohort allocation'}
+            </p>
           </div>
-          <p className="text-[10px] text-slate-500 mt-1">
-            {menteesList.length > 0 ? 'Click to view year-wise breakdown below' : 'Awaiting admin cohort allocation'}
-          </p>
-        </div>
+        )}
 
         {/* View Personal Timetable (Scrolls down to timetable directly in dashboard) */}
         <div
@@ -272,7 +284,8 @@ export const FacultyDashboard: React.FC = () => {
       </div>
 
       {/* Year-Wise Mentee Students Details Section */}
-      <section id="dashboard-mentee-details" className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+      {user?.role !== 'NON_TEACHING' && (
+        <section id="dashboard-mentee-details" className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div>
             <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
@@ -380,6 +393,7 @@ export const FacultyDashboard: React.FC = () => {
           </div>
         )}
       </section>
+      )}
 
       {/* Embedded Personal Timetable Section (Directly on Dashboard) */}
       <section id="dashboard-personal-timetable" className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">

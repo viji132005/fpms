@@ -101,10 +101,10 @@ export const FacultyProfileView: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
           <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-            Faculty Profile & Portfolio Dossier
+            {user.role === 'NON_TEACHING' ? 'Staff Profile & Portfolio Dossier' : 'Faculty Profile & Portfolio Dossier'}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Complete your profile photo, official curriculum vitae, and academic qualifications.
+            Complete your profile photo, official curriculum vitae, and qualifications.
           </p>
         </div>
       </div>
@@ -167,7 +167,7 @@ export const FacultyProfileView: React.FC = () => {
 
             <div className="space-y-1 text-center sm:text-left flex-1">
               <div className="text-sm font-bold text-slate-900">
-                {formData.fullName || 'Faculty Member'}
+                {formData.fullName || (user.role === 'NON_TEACHING' ? 'Staff Member' : 'Faculty Member')}
               </div>
               <div className="text-slate-600">{formData.designation}</div>
               <div className="text-slate-500 font-mono text-[11px]">{user.email}</div>
@@ -191,7 +191,7 @@ export const FacultyProfileView: React.FC = () => {
                 required
                 value={formData.fullName}
                 onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                placeholder="Dr. / Prof. Ramesh Babu"
+                placeholder={user.role === 'NON_TEACHING' ? 'Sri / Smt. Ramesh Babu' : 'Dr. / Prof. Ramesh Babu'}
                 className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#7B1113]"
               />
             </div>
@@ -236,10 +236,10 @@ export const FacultyProfileView: React.FC = () => {
           {/* Real CV Upload & View Section */}
           <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
             <label className="block font-bold text-slate-800">
-              Curriculum Vitae (CV / Comprehensive Resume)
+              {user.role === 'NON_TEACHING' ? 'Staff Curriculum Vitae (CV / Comprehensive Resume)' : 'Curriculum Vitae (CV / Comprehensive Resume)'}
             </label>
             <p className="text-[11px] text-slate-500">
-              Upload your verified faculty resume in PDF format. This will be accessible to the Department HOD and Principal.
+              Upload your verified resume in PDF format. This will be accessible to the Department HOD and Administration.
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-1">

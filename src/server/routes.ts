@@ -1239,13 +1239,13 @@ apiRouter.get(
     // Never treat admins as teaching faculty or staff records.
     profiles = profiles.filter((p) => p.user?.role !== 'ADMIN');
 
-    // Scoping: If HOD, limit to their department unless they want peer overview
-    if (currentUser.role === 'HOD' && currentUser.departmentId) {
+    // Scoping: Support departmentId filtering or ALL scope across departments
+    if (departmentId && departmentId !== 'ALL') {
+      profiles = profiles.filter((p) => p.user?.departmentId === departmentId);
+    } else if (!departmentId && currentUser.role === 'HOD' && currentUser.departmentId) {
       profiles = profiles.filter(
         (p) => p.user?.departmentId === currentUser.departmentId
       );
-    } else if (departmentId) {
-      profiles = profiles.filter((p) => p.user?.departmentId === departmentId);
     }
 
     if (type === 'teaching') {
@@ -1950,6 +1950,9 @@ apiRouter.post(
     // Save
     data.students = updatedStudents as any;
     data.studentPromotionHistory.unshift(...(historyRecords as any));
+    data.structuredTimetables = (data.structuredTimetables || []).filter(
+      (st) => !(st.departmentId === departmentId && st.studentYear === Number(fromYear))
+    );
     db.save();
 
     logAudit(
@@ -2010,6 +2013,9 @@ apiRouter.post(
     // Persist updated records
     data.students = updatedStudents as any;
     data.studentPromotionHistory.unshift(...(historyRecords as any));
+    data.structuredTimetables = (data.structuredTimetables || []).filter(
+      (st) => st.departmentId !== departmentId
+    );
     db.save();
 
     logAudit(
@@ -2077,6 +2083,15 @@ apiRouter.post(
 
     data.students = updatedStudents as any;
     data.studentPromotionHistory.unshift(...(historyRecords as any));
+
+    // Clear previous semester structured timetables so new semester begins cleanly
+    const previousSemestersToClear = summary.cycleCompleted === 'ODD'
+      ? ['1st Semester', '3rd Semester', '5th Semester', '7th Semester', 'Odd Semester (V Sem)']
+      : ['2nd Semester', '4th Semester', '6th Semester', '8th Semester'];
+    data.structuredTimetables = (data.structuredTimetables || []).filter(
+      (st) => !(st.departmentId === departmentId && previousSemestersToClear.includes(st.semester))
+    );
+
     db.save();
 
     logAudit(
@@ -3070,7 +3085,7 @@ apiRouter.get(
         return tSemNum === activeSem || t.semester === activeSemOrdinal;
       });
 
-      const timetablesToUse = matchingSemTimetables.length > 0 ? matchingSemTimetables : yrTimetables;
+      const timetablesToUse = matchingSemTimetables;
 
       if (timetablesToUse.length > 0) {
         // Sort by publishedAt or updatedAt descending to pick latest committed session
@@ -5029,6 +5044,16 @@ apiRouter.get(
         if (n.recipientUserId === currentUser.id || n.recipientUserId === 'ALL') return true;
         if (n.recipientUserId === 'FACULTY' && currentUser.role === 'FACULTY') return true;
 
+        // Department-scoped circular
+        if (n.recipientUserId && n.recipientUserId.startsWith('DEPT_')) {
+          const deptTarget = n.recipientUserId.replace('DEPT_', '');
+          return (
+            currentUser.role === 'ADMIN' ||
+            currentUser.departmentId === deptTarget ||
+            n.actorUserId === currentUser.id
+          );
+        }
+
         // Author of circular always sees their circulated notices
         if (n.actorUserId === currentUser.id) return true;
 
@@ -5038,7 +5063,7 @@ apiRouter.get(
           if (author?.role === 'ADMIN') return true;
           // If sent by HOD of the current user's department
           if (currentUser.departmentId && author?.departmentId === currentUser.departmentId) return true;
-          // In academic institution, circulars without restriction are open
+          // In academic institution, college-wide circulars without restriction are open
           if (!n.recipientUserId || n.recipientUserId === 'ALL') return true;
         }
         return false;
@@ -5284,7 +5309,7 @@ apiRouter.put(
 apiRouter.post(
   '/notifications/circular',
   authMiddleware,
-  requireRole(['ADMIN', 'HOD']),
+  requireRole(['ADMIN', 'HOD', 'NON_TEACHING', 'FACULTY']),
   (req: AuthenticatedRequest, res: Response) => {
     const {
       title,
@@ -5321,10 +5346,14 @@ apiRouter.post(
       circularNumber?.trim() ||
       `MITM/${deptCode}/CIR/${new Date().getFullYear()}/${Math.floor(100 + Math.random() * 900)}`;
 
+    // Resolve target audience: 1. Department Staff Only or 2. Throughout the College
+    const isDeptOnly = targetAudience === 'DEPARTMENT_STAFF';
+    const recipientUserId = isDeptOnly ? `DEPT_${req.user!.departmentId || 'dept-ise'}` : 'ALL';
+
     // Create exactly ONE single broadcast notification record instead of duplicating per user
     const singleNotif: Notification = {
       id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      recipientUserId: targetAudience === 'FACULTY' ? 'FACULTY' : 'ALL',
+      recipientUserId,
       actorUserId: req.user!.id,
       actorName,
       title: title.trim(),
@@ -5351,7 +5380,7 @@ apiRouter.post(
       'CIRCULATE_OFFICIAL_NOTICE',
       'CIRCULAR',
       autoRefNo,
-      `Circulated official notice: "${title}" (Target: ${targetAudience === 'FACULTY' ? 'Faculty' : 'All Staff'}).`,
+      `Circulated official notice: "${title}" (Target: ${isDeptOnly ? `Department Staff (${deptCode})` : 'Throughout the College (All Departments)'}).`,
       req
     );
 

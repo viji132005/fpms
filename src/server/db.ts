@@ -618,9 +618,9 @@ class DatabaseManager {
       }
     }
 
-    // Seed 6th sem timetables if not present
-    if (!data.structuredTimetables.some((t) => t.semester === '6th Semester')) {
-      data.structuredTimetables.push(...getInitial6thSemTimetables());
+    // Seed 5th sem (Year 3) timetables if not present
+    if (!data.structuredTimetables.some((t) => t.studentYear === 3 && t.status === 'PUBLISHED')) {
+      data.structuredTimetables.push(...this.generateYear3Timetables());
     }
 
     // Seed 4th sem (Year 2) timetables if not present
@@ -837,6 +837,82 @@ class DatabaseManager {
         publishedAt: now,
         publishedBy: 'ise.admin@mitmysore.in (Prof. K. S. Manjunath)',
         retentionNote: 'Official MIT Mysore Odd Semester 2026-27 III Semester Timetable.',
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
+  }
+
+  private generateYear3Timetables(): StructuredTimetable[] {
+    const now = new Date().toISOString();
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const periods = [
+      { index: 0, timeRange: '09:00 - 10:00' },
+      { index: 1, timeRange: '10:00 - 11:00' },
+      { index: 2, timeRange: '11:15 - 12:15' },
+      { index: 3, timeRange: '12:15 - 01:15' },
+      { index: 4, timeRange: '02:00 - 03:00' },
+      { index: 5, timeRange: '03:00 - 04:00' },
+      { index: 6, timeRange: '04:00 - 05:00' },
+    ];
+
+    const y3Assignments: FacultyAssignment[] = [
+      { id: 'fa-y3-1', courseCode: '21IS51', courseTitle: 'Automata Theory and Compiler Design', facultyUserId: 'user-fac-amruth', facultyName: 'Prof. Amruth V', staffId: '', hoursPerWeek: 4, isLab: false, color: '#7B1113' },
+      { id: 'fa-y3-2', courseCode: '21IS52', courseTitle: 'Computer Networks & Internet Protocols', facultyUserId: 'user-fac-ravi', facultyName: 'Dr. Ravi P', staffId: '', hoursPerWeek: 4, isLab: false, color: '#1e3a8a' },
+      { id: 'fa-y3-3', courseCode: '21IS53', courseTitle: 'Database Management Systems', facultyUserId: 'user-fac-bhavya', facultyName: 'Prof. Bhavya H D', staffId: '', hoursPerWeek: 4, isLab: false, color: '#065f46' },
+      { id: 'fa-y3-4', courseCode: '21IS54', courseTitle: 'Artificial Intelligence & Machine Learning', facultyUserId: 'user-fac-ganavi', facultyName: 'Prof. Ganavi N P', staffId: '', hoursPerWeek: 4, isLab: false, color: '#5b21b6' },
+      { id: 'fa-y3-5', courseCode: '21ISL56', courseTitle: 'DBMS and Computer Networks Laboratory', facultyUserId: 'user-fac-siddaraju', facultyName: 'Prof. Siddaraju M G', staffId: '', hoursPerWeek: 3, isLab: true, color: '#c2410c' },
+    ];
+
+    const teachers = ['Prof. Amruth V', 'Prof. Bhavya H D', 'Prof. Ganavi N P'];
+
+    return (['Section A', 'Section B', 'Section C'] as const).map((sec, secIdx) => {
+      const schedule: TimetableSlot[] = [];
+      days.forEach((day, dIdx) => {
+        periods.forEach((p, pIdx) => {
+          const assignIdx = (dIdx + pIdx + secIdx) % y3Assignments.length;
+          const a = pIdx < 5 ? y3Assignments[assignIdx] : null;
+          schedule.push({
+            day,
+            periodIndex: p.index,
+            timeRange: p.timeRange,
+            courseCode: a ? a.courseCode : '',
+            courseTitle: a ? a.courseTitle : '',
+            facultyUserId: a ? a.facultyUserId : '',
+            facultyName: a ? a.facultyName : '',
+            room: a?.isLab ? 'ISE Advanced Computing Lab' : `LH-30${1 + secIdx} (ISE 3rd Year)`,
+            isLab: a?.isLab || false,
+          });
+        });
+      });
+
+      return {
+        id: `st-ise-5th-${sec.toLowerCase().replace(' ', '-')}`,
+        departmentId: 'dept-ise',
+        academicYear: '2026-27',
+        semester: '5th Semester',
+        section: sec,
+        studentYear: 3,
+        title: `WEEKLY ACADEMIC CLASS TIMETABLE - 2026-27 ODD SEM - V SEMESTER ${sec.toUpperCase()}`,
+        roomNumber: `Room Number:- ${301 + secIdx}`,
+        classTeacher: teachers[secIdx] || 'Prof. Amruth V',
+        status: 'PUBLISHED' as const,
+        isValidated: true,
+        version: 1,
+        isActive: true,
+        facultyAssignments: y3Assignments,
+        schedule,
+        subjectLegend: y3Assignments.map((a) => ({
+          code: a.courseCode,
+          title: a.courseTitle,
+          shortName: a.courseCode.substring(2),
+          facultyName: a.facultyName,
+          facultyInitials: a.facultyName.split(' ').map((n) => n[0]).join(''),
+        })),
+        validationReport: { isValid: true, checkedAt: now, conflicts: [], warnings: [] },
+        publishedAt: now,
+        publishedBy: 'ise.admin@mitmysore.in (Prof. K. S. Manjunath)',
+        retentionNote: 'Official MIT Mysore Odd Semester 2026-27 V Semester Timetable.',
         createdAt: now,
         updatedAt: now,
       };

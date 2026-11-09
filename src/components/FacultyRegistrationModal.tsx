@@ -4,7 +4,6 @@ import { authFetch } from '../utils/api.ts';
 import {
   Camera,
   UserCheck,
-  Phone,
   GraduationCap,
   Briefcase,
   Sparkles,
@@ -24,10 +23,10 @@ export const FacultyRegistrationModal: React.FC<Props> = ({ isOpen, onSuccess })
 
   const [formData, setFormData] = useState({
     fullName: profile?.fullName || '',
-    designation: profile?.designation || 'Assistant Professor',
-    qualification: profile?.qualification || 'M.Tech in Computer Science',
+    designation: profile?.designation || (user?.role === 'NON_TEACHING' ? 'Technical Assistant' : 'Assistant Professor'),
+    qualification: profile?.qualification || (user?.role === 'NON_TEACHING' ? 'Diploma / Degree' : 'M.Tech in Computer Science'),
     phone: profile?.phone || '',
-    specialization: profile?.specialization || 'Full Stack Development',
+    specialization: profile?.specialization || (user?.role === 'NON_TEACHING' ? 'Lab Infrastructure' : 'Full Stack Development'),
     bio: profile?.bio || '',
     profilePhotoUrl: profile?.profilePhotoUrl || '',
     cvUrl: profile?.cvUrl || '',
@@ -79,10 +78,6 @@ export const FacultyRegistrationModal: React.FC<Props> = ({ isOpen, onSuccess })
       setErrorMessage('Please enter your full name.');
       return;
     }
-    if (!formData.phone.trim()) {
-      setErrorMessage('Please provide your active contact phone number.');
-      return;
-    }
 
     setIsSubmitting(true);
     try {
@@ -109,6 +104,8 @@ export const FacultyRegistrationModal: React.FC<Props> = ({ isOpen, onSuccess })
     }
   };
 
+  const isNonTeaching = user.role === 'NON_TEACHING';
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 sm:p-8 my-8 animate-in fade-in-50 zoom-in-95">
@@ -121,10 +118,10 @@ export const FacultyRegistrationModal: React.FC<Props> = ({ isOpen, onSuccess })
             Maharaja Institute of Technology, Mysore
           </div>
           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mt-1">
-            Faculty Profile Registration
+            {isNonTeaching ? 'Staff Profile Registration' : 'Faculty Profile Registration'}
           </h2>
           <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-            Welcome to FPMS! Please complete your official faculty details and upload your profile picture (DP) to set up your account.
+            Welcome to FPMS! Please complete your official profile details and upload your profile picture (DP) to set up your account.
           </p>
         </div>
 
@@ -136,7 +133,7 @@ export const FacultyRegistrationModal: React.FC<Props> = ({ isOpen, onSuccess })
         )}
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Circular Facebook / WhatsApp style DP uploader */}
+          {/* Circular DP uploader */}
           <div className="flex flex-col items-center justify-center pb-2">
             <div className="relative group">
               <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full ring-4 ring-[#7B1113]/20 shadow-xl overflow-hidden bg-slate-100 flex items-center justify-center border-2 border-white">
@@ -184,83 +181,59 @@ export const FacultyRegistrationModal: React.FC<Props> = ({ isOpen, onSuccess })
                 required
                 value={formData.fullName}
                 onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                placeholder="e.g. Prof. Gururaja M P"
+                placeholder={isNonTeaching ? 'e.g. Sri / Smt. Ramesh Babu' : 'e.g. Prof. Gururaja M P'}
                 className="w-full px-3.5 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7B1113] bg-white font-medium"
               />
             </div>
 
-            {/* Staff ID (Read-only badge) */}
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">
-                Staff / Employee ID
-              </label>
-              <input
-                type="text"
-                disabled
-                value={profile?.staffId || ''}
-                className="w-full px-3.5 py-2 border border-slate-200 rounded-xl bg-slate-50 text-slate-600 font-mono font-bold cursor-not-allowed"
-              />
-            </div>
-
-            {/* Official Designation and Qualification (Fixed as entered by Admin) */}
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl sm:col-span-2 space-y-1.5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                <div>
-                  <span className="font-bold text-slate-700">Official Designation: </span>
-                  <span className="text-slate-900 font-semibold">{profile?.designation || formData.designation || 'Faculty'}</span>
-                </div>
-                <div>
-                  <span className="font-bold text-slate-700">Qualification: </span>
-                  <span className="text-slate-900 font-semibold">{profile?.qualification || formData.qualification || 'M.Tech'}</span>
-                </div>
-              </div>
-              <p className="text-[10px] text-slate-500 italic">
-                * Note: Designation and Qualification are fixed as entered by Administration. To request updates, please meet the Department Administrator or HOD.
-              </p>
-            </div>
-
-            {/* Phone Number */}
-            <div>
-              <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
-                <Phone className="w-3.5 h-3.5 text-[#7B1113]" />
-                <span>Contact Phone Number *</span>
-              </label>
-              <input
-                type="tel"
-                required
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                placeholder="e.g. +91 98765 43210"
-                className="w-full px-3.5 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7B1113] bg-white font-medium"
-              />
-            </div>
-
-            {/* Core Specialization */}
+            {/* Core Specialization / Domain */}
             <div>
               <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
                 <BookOpen className="w-3.5 h-3.5 text-[#7B1113]" />
-                <span>Area of Specialization</span>
+                <span>{isNonTeaching ? 'Technical Specialization / Domain' : 'Area of Specialization'}</span>
               </label>
               <input
                 type="text"
                 value={formData.specialization}
                 onChange={(e) => setFormData({ ...formData, specialization: e.target.value })}
-                placeholder="e.g. Machine Learning, Cloud"
+                placeholder={isNonTeaching ? 'e.g. Systems & Network Administration' : 'e.g. Machine Learning, Cloud'}
                 className="w-full px-3.5 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7B1113] bg-white font-medium"
               />
             </div>
+
+            {/* Official Designation and Qualification */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl sm:col-span-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div>
+                  <span className="font-bold text-slate-700">Official Designation: </span>
+                  <span className="text-slate-900 font-semibold">
+                    {profile?.designation || formData.designation || (isNonTeaching ? 'Staff' : 'Faculty')}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-bold text-slate-700">Qualification: </span>
+                  <span className="text-slate-900 font-semibold">
+                    {profile?.qualification || formData.qualification || (isNonTeaching ? 'Diploma / Degree' : 'M.Tech')}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Academic Bio */}
+          {/* Academic / Professional Bio */}
           <div>
             <label className="block font-bold text-slate-700 mb-1">
-              Short Academic Bio / Teaching Philosophy
+              {isNonTeaching ? 'Short Professional Bio / Department Responsibilities' : 'Short Academic Bio / Teaching Philosophy'}
             </label>
             <textarea
               rows={2}
               value={formData.bio}
               onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
-              placeholder="Brief summary of your academic background, research interests, and subjects handled..."
+              placeholder={
+                isNonTeaching
+                  ? 'Brief summary of your professional background, laboratory responsibilities, and institutional support...'
+                  : 'Brief summary of your academic background, research interests, and subjects handled...'
+              }
               className="w-full px-3.5 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7B1113] bg-white"
             />
           </div>
@@ -270,7 +243,9 @@ export const FacultyRegistrationModal: React.FC<Props> = ({ isOpen, onSuccess })
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-slate-500" />
               <div>
-                <div className="font-bold text-slate-800">Faculty Curriculum Vitae (CV)</div>
+                <div className="font-bold text-slate-800">
+                  {isNonTeaching ? 'Staff Curriculum Vitae (CV)' : 'Faculty Curriculum Vitae (CV)'}
+                </div>
                 <div className="text-[10px] text-slate-500">
                   {formData.cvUrl ? 'CV file attached' : 'Optional document attachment'}
                 </div>

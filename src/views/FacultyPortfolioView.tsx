@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { PortfolioItem, StaffProfile } from '../types/index.ts';
+import { PortfolioItem, StaffProfile, Department } from '../types/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { authFetch } from '../utils/api.ts';
 import {
@@ -25,6 +25,8 @@ import {
   ExternalLink,
   ChevronRight,
   BookOpen,
+  Building2,
+  CheckCircle2,
 } from 'lucide-react';
 
 export const FacultyPortfolioView: React.FC = () => {
@@ -38,6 +40,10 @@ export const FacultyPortfolioView: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [search, setSearch] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Departments category state (dynamic from Master Admin)
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [selectedDeptId, setSelectedDeptId] = useState<string>(user?.departmentId || department?.id || 'dept-ise');
 
   // Data state
   const [allFaculty, setAllFaculty] = useState<StaffProfile[]>([]);
@@ -96,20 +102,32 @@ export const FacultyPortfolioView: React.FC = () => {
     'Honors & Awards',
   ];
 
-  // Load all faculty profiles and portfolio items
+  // Load all faculty profiles, portfolio items, and registered departments
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [staffRes, portfolioRes] = await Promise.all([
-        authFetch('/api/staff?type=teaching'),
+      const [staffRes, portfolioRes, deptsRes] = await Promise.all([
+        authFetch('/api/staff?type=teaching&departmentId=ALL'),
         authFetch('/api/portfolio'), // Public institutional repository
+        authFetch('/api/departments'), // Real departments registered in Master Admin
       ]);
 
       const staffData = staffRes.ok ? await staffRes.json() : [];
       const portfolioData = portfolioRes.ok ? await portfolioRes.json() : [];
+      const deptsData = deptsRes.ok ? await deptsRes.json() : [];
 
       if (Array.isArray(staffData)) setAllFaculty(staffData);
       if (Array.isArray(portfolioData)) setAllItems(portfolioData);
+      if (Array.isArray(deptsData)) {
+        setDepartments(deptsData);
+        // By default the user's department academic portfolio has to be displayed
+        const userDept = user?.departmentId || department?.id;
+        if (userDept && deptsData.some((d: Department) => d.id === userDept)) {
+          setSelectedDeptId((prev) => prev || userDept);
+        } else if (deptsData.length > 0) {
+          setSelectedDeptId((prev) => prev || deptsData[0].id);
+        }
+      }
     } catch (err) {
       console.error('Error loading portfolio directory:', err);
     } finally {
@@ -136,19 +154,53 @@ export const FacultyPortfolioView: React.FC = () => {
     }
   }, [selectedFacultyId, user, allItems]);
 
-  // Order faculty list so the current user's folder is FIRST
+  // Real count of faculty folders per department
+  const facultyCountByDept = React.useMemo(() => {
+    const map: Record<string, number> = {};
+    (allFaculty || []).forEach((f: any) => {
+      const dId = f.user?.departmentId || f.departmentId || f.department?.id;
+      if (dId) {
+        map[dId] = (map[dId] || 0) + 1;
+      }
+    });
+    return map;
+  }, [allFaculty]);
+
+  // Current active department entity
+  const currentDept = departments.find((d) => d.id === selectedDeptId) || department || null;
+
+  // Dynamically sort departments so the active/opened department corner is ALWAYS in first position
+  const sortedDepartments = React.useMemo(() => {
+    if (!departments || departments.length === 0) return [];
+    if (!selectedDeptId) return departments;
+
+    const activeDept = departments.find((d) => d.id === selectedDeptId);
+    if (!activeDept) return departments;
+
+    const remainingDepts = departments.filter((d) => d.id !== selectedDeptId);
+    return [activeDept, ...remainingDepts];
+  }, [departments, selectedDeptId]);
+
+  // Order faculty list for the selected department: user's folder is FIRST if in this department
   const sortedFacultyList = React.useMemo(() => {
     if (!allFaculty || allFaculty.length === 0) return [];
     const currentUserId = user?.id;
 
-    const myProfile = allFaculty.find((f) => f.userId === currentUserId);
-    const others = allFaculty.filter((f) => f.userId !== currentUserId);
+    // Filter by selected department category
+    const deptFaculty = allFaculty.filter((f: any) => {
+      if (!selectedDeptId) return true;
+      const dId = f.user?.departmentId || f.departmentId || f.department?.id;
+      return dId === selectedDeptId;
+    });
+
+    const myProfile = deptFaculty.find((f) => f.userId === currentUserId);
+    const others = deptFaculty.filter((f) => f.userId !== currentUserId);
 
     // Sort others alphabetically by full name
     others.sort((a, b) => a.fullName.localeCompare(b.fullName));
 
     return myProfile ? [myProfile, ...others] : others;
-  }, [allFaculty, user]);
+  }, [allFaculty, selectedDeptId, user]);
 
   // Selected faculty profile
   const currentFaculty = allFaculty.find((f) => f.userId === selectedFacultyId) || null;
@@ -334,6 +386,10 @@ export const FacultyPortfolioView: React.FC = () => {
             >
               Academic Repository
             </span>
+            <span>/</span>
+            <span className="text-slate-800 font-bold">
+              {currentDept?.code || 'Dept'} · {currentDept?.name || 'Department'}
+            </span>
             {currentFaculty && (
               <>
                 <span>/</span>
@@ -413,10 +469,64 @@ export const FacultyPortfolioView: React.FC = () => {
       {/* VIEW 1: ROOT DIRECTORY - ALL FACULTY FOLDERS */}
       {!selectedFacultyId && (
         <div className="space-y-6">
+          {/* Department Category Filter Bar */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-[#7B1113]" />
+              <span className="text-xs font-bold text-slate-900">
+                Department Category Filter
+              </span>
+            </div>
+
+            {/* Department Category Pills with Active Department First */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 scrollbar-thin">
+              {sortedDepartments.map((dept) => {
+                const isSelected = selectedDeptId === dept.id;
+                const count = facultyCountByDept[dept.id] || 0;
+
+                return (
+                  <button
+                    key={dept.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDeptId(dept.id);
+                      setSelectedFacultyId(null);
+                      setSelectedCategory('ALL');
+                      setSearch('');
+                    }}
+                    className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs transition-all shrink-0 cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#7B1113] text-white font-bold shadow-sm'
+                        : 'bg-slate-50 text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
+                    }`}
+                  >
+                    <Building2 className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : 'text-slate-500'}`} />
+                    <span className="font-extrabold">{dept.code}</span>
+                    <span className="opacity-90 text-[11px] truncate max-w-[150px]">
+                      {dept.name.replace('Department of ', '')}
+                    </span>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                        isSelected
+                          ? 'bg-white/20 text-white'
+                          : 'bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Search Bar & Stats */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
             <div className="text-xs text-slate-600">
-              Showing <strong>{sortedFacultyList.length} Faculty Dossier Folders</strong> in Department
+              Showing <strong>{sortedFacultyList.length} Faculty Dossier Folders</strong> in{' '}
+              <strong className="text-slate-800">
+                {currentDept?.name || 'Selected Department'} ({currentDept?.code || ''})
+              </strong>
             </div>
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
@@ -431,8 +541,19 @@ export const FacultyPortfolioView: React.FC = () => {
           </div>
 
           {/* Grid of Faculty Folders */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sortedFacultyList
+          {sortedFacultyList.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-xs text-slate-500 shadow-sm">
+              <FolderOpen className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <p className="font-bold text-slate-800 text-sm">
+                No Faculty Dossiers in {currentDept?.name || 'this department'}
+              </p>
+              <p className="text-slate-500 mt-1">
+                Faculty appointed in {currentDept?.code || 'this department'} will automatically have their dossiers listed here.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {sortedFacultyList
               .filter((fac) => {
                 if (!search) return true;
                 const q = search.toLowerCase();
@@ -517,7 +638,8 @@ export const FacultyPortfolioView: React.FC = () => {
                   </div>
                 );
               })}
-          </div>
+            </div>
+          )}
         </div>
       )}
 

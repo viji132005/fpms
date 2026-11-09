@@ -21,7 +21,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Edit2,
-  Trash2,
   Power,
   FileText,
 } from 'lucide-react';
@@ -1027,7 +1026,7 @@ Notice: ${handoverCard.instructions}
                     .filter((f: any) => f.user?.departmentId === selectedDeptForHod.id)
                     .map((fac) => (
                       <option key={fac.userId} value={fac.userId}>
-                        {fac.fullName} ({fac.designation}) — {fac.staffId}
+                        {fac.fullName} ({fac.designation})
                       </option>
                     ))}
                 </select>

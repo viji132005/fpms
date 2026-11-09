@@ -45,7 +45,7 @@ export const NotificationsView: React.FC = () => {
     message: '',
     attachmentUrl: '',
     attachmentName: '',
-    targetAudience: 'ALL' as 'ALL' | 'FACULTY',
+    targetAudience: 'DEPARTMENT_STAFF' as 'DEPARTMENT_STAFF' | 'COLLEGE_WIDE',
   });
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -308,7 +308,7 @@ export const NotificationsView: React.FC = () => {
           message: '',
           attachmentUrl: '',
           attachmentName: '',
-          targetAudience: 'ALL',
+          targetAudience: 'DEPARTMENT_STAFF',
         });
         setValidityChoice('PERMANENT');
         setCustomExpiryDate('');
@@ -376,10 +376,10 @@ export const NotificationsView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 self-start flex-wrap">
-          {(isMasterAdmin || user?.role === 'ADMIN' || user?.role === 'HOD') && (
+          {(isMasterAdmin || user?.role === 'ADMIN' || user?.role === 'HOD' || user?.role === 'NON_TEACHING' || user?.role === 'FACULTY') && (
             <button
               onClick={() => setShowCirculateModal(true)}
-              className="px-3.5 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm flex items-center gap-1.5 transition-colors"
+              className="px-3.5 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Circulate Official Notice</span>
@@ -755,13 +755,17 @@ export const NotificationsView: React.FC = () => {
                     onChange={(e) =>
                       setCircularForm({
                         ...circularForm,
-                        targetAudience: e.target.value as 'ALL' | 'FACULTY',
+                        targetAudience: e.target.value as 'DEPARTMENT_STAFF' | 'COLLEGE_WIDE',
                       })
                     }
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#7B1113] text-xs bg-white cursor-pointer"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#7B1113] text-xs bg-white cursor-pointer font-medium"
                   >
-                    <option value="ALL">All Staff & Faculty (Department / College)</option>
-                    <option value="FACULTY">Teaching Faculty Only</option>
+                    <option value="DEPARTMENT_STAFF">
+                      1. Department Staff Only ({deptName || deptCode})
+                    </option>
+                    <option value="COLLEGE_WIDE">
+                      2. Throughout the College (All Departments & Staff)
+                    </option>
                   </select>
                 </div>
 
