@@ -17,6 +17,7 @@ import {
   Download,
   AlertCircle,
 } from 'lucide-react';
+import { PdfCanvasViewer } from '../components/PdfCanvasViewer.tsx';
 
 export const FacultyProfileView: React.FC = () => {
   const { user, profile, department, refreshAuth } = useAuth();
@@ -59,12 +60,18 @@ export const FacultyProfileView: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 15 * 1024 * 1024) {
+      setErrorMessage('File size exceeds 15 MB limit. Please select a smaller document.');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       setFormData((prev) => ({
         ...prev,
         cvUrl: reader.result as string,
       }));
+      setSuccessMessage(`Resume file "${file.name}" attached successfully! Click "Save Profile & Documents" to persist.`);
     };
     reader.readAsDataURL(file);
   };
@@ -315,18 +322,41 @@ export const FacultyProfileView: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-auto p-4 bg-slate-100 flex items-center justify-center min-h-[450px]">
-              {formData.cvUrl.startsWith('data:image/') ? (
+              {formData.cvUrl.startsWith('data:image/') || formData.cvUrl.match(/\.(png|jpe?g|webp|gif)$/i) ? (
                 <img
                   src={formData.cvUrl}
                   alt="Faculty CV"
                   className="max-w-full max-h-[75vh] object-contain rounded-lg shadow border border-slate-200 bg-white"
                 />
+              ) : formData.cvUrl.startsWith('data:application/vnd.openxmlformats-officedocument.wordprocessingml.document') ||
+                formData.cvUrl.startsWith('data:application/msword') ||
+                formData.cvUrl.endsWith('.doc') ||
+                formData.cvUrl.endsWith('.docx') ? (
+                <div className="text-center p-8 bg-white rounded-xl border border-slate-200 max-w-md shadow-sm">
+                  <FileText className="w-12 h-12 text-[#7B1113] mx-auto mb-3" />
+                  <p className="font-bold text-slate-800 text-sm">
+                    {formData.fullName ? `${formData.fullName} - Curriculum Vitae` : 'Curriculum Vitae'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Microsoft Word document attached. Click below to download and view.
+                  </p>
+                  <a
+                    href={formData.cvUrl}
+                    download={`${formData.fullName || 'Faculty'}_Resume.docx`}
+                    className="mt-4 px-4 py-2 text-xs font-semibold text-white bg-[#7B1113] hover:bg-[#600d0f] rounded-lg inline-flex items-center gap-2 cursor-pointer shadow-sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download Word Document</span>
+                  </a>
+                </div>
               ) : (
-                <iframe
-                  src={formData.cvUrl}
-                  title="Faculty CV"
-                  className="w-full h-[75vh] rounded-lg border border-slate-300 bg-white"
-                />
+                <div className="w-full h-[75vh] flex flex-col">
+                  <PdfCanvasViewer
+                    url={formData.cvUrl}
+                    originalUrl={formData.cvUrl}
+                    fileName={`${formData.fullName || 'Faculty'}_Resume.pdf`}
+                  />
+                </div>
               )}
             </div>
           </div>

@@ -451,6 +451,16 @@ class DatabaseManager {
             s.currentSemester = s.currentYear === 1 ? 1 : s.currentYear === 2 ? 3 : s.currentYear === 3 ? 5 : 7;
           }
         }
+        // Ensure non-teaching staff are strictly classified with role NON_TEACHING and isMentorEligible false
+        for (const sp of loaded.staffProfiles || []) {
+          if (sp.isTeachingFaculty === false) {
+            sp.isMentorEligible = false;
+            const u = (loaded.users || []).find((usr) => usr.id === sp.userId);
+            if (u && u.role === 'FACULTY') {
+              u.role = 'NON_TEACHING';
+            }
+          }
+        }
         this.ensureMasterAdminUsers(loaded);
         this.saveData(loaded);
         return loaded;
@@ -1105,7 +1115,7 @@ class DatabaseManager {
         id: 'user-staff-ramesh',
         email: 'ramesh.lab@mitmysore.in',
         passwordHash: 'mitm123',
-        role: 'FACULTY',
+        role: 'NON_TEACHING',
         departmentId: 'dept-ise',
         status: 'ACTIVE',
         mustChangePassword: false,

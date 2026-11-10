@@ -22,6 +22,7 @@ import { FacultyPersonalGridCell } from '../types/index.ts';
 
 export const FacultyDashboard: React.FC = () => {
   const { user, profile, department, setActiveTab } = useAuth();
+  const isNonTeaching = user?.role === 'NON_TEACHING' || profile?.isTeachingFaculty === false;
   const [portfolioItems, setPortfolioItems] = useState<any[]>([]);
   const [menteesList, setMenteesList] = useState<any[]>([]);
   const [recentFeed, setRecentFeed] = useState<any[]>([]);
@@ -39,9 +40,13 @@ export const FacultyDashboard: React.FC = () => {
 
   useEffect(() => {
     setIsLoading(true);
+    const fetchMentees = isNonTeaching
+      ? Promise.resolve([])
+      : authFetch('/api/mentor-allocation/my-students').then((r) => (r.ok ? r.json() : []));
+
     Promise.all([
       authFetch('/api/portfolio?scope=mine').then((r) => (r.ok ? r.json() : [])),
-      authFetch('/api/mentor-allocation/my-students').then((r) => (r.ok ? r.json() : [])),
+      fetchMentees,
       authFetch('/api/feed').then((r) => (r.ok ? r.json() : [])),
       authFetch('/api/faculty/personal-schedule').then((r) => (r.ok ? r.json() : { schedule: { grid: {} } })),
     ])
@@ -53,7 +58,7 @@ export const FacultyDashboard: React.FC = () => {
       })
       .catch((err) => console.error(err))
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [isNonTeaching]);
 
   // Filter mentees by year
   const filteredMentees = menteesList.filter((item) => {
@@ -93,11 +98,15 @@ export const FacultyDashboard: React.FC = () => {
           <p className="text-xs text-rose-100 mt-1 max-w-xl">
             {profile?.designation || 'Faculty'} · {profile?.qualification || 'Department Faculty'}
           </p>
-          {/* Email only */}
+          {/* Email & Phone */}
           <div className="mt-3 flex items-center gap-3 flex-wrap text-xs text-rose-100">
             <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
               <Mail className="w-3.5 h-3.5 text-amber-300 shrink-0" />
               <span>{user?.email || (profile as any)?.email || 'email@mitmysore.in'}</span>
+            </span>
+            <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
+              <Phone className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+              <span>{profile?.phone || (user as any)?.phone || '9845012345'}</span>
             </span>
           </div>
         </div>
@@ -121,7 +130,7 @@ export const FacultyDashboard: React.FC = () => {
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className={`grid grid-cols-1 ${isNonTeaching ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-4`}>
         {/* Academic Records */}
         <div
           onClick={() => setActiveTab('portfolio')}
@@ -139,24 +148,8 @@ export const FacultyDashboard: React.FC = () => {
           </p>
         </div>
 
-        {/* Assigned Mentees or Staff Profile */}
-        {user?.role === 'NON_TEACHING' ? (
-          <div
-            onClick={() => setActiveTab('profile')}
-            className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-[#7B1113] transition-all hover:-translate-y-0.5"
-          >
-            <div className="flex items-center justify-between text-slate-500 mb-1">
-              <span className="text-xs font-semibold text-slate-700">My Staff Profile</span>
-              <User className="w-4 h-4 text-emerald-600" />
-            </div>
-            <div className="text-sm font-extrabold text-slate-900 mt-2">
-              {profile?.isProfileRegistered ? 'Dossier Registered' : 'Registration Pending'}
-            </div>
-            <p className="text-[10px] text-slate-500 mt-1">
-              Click to view and update official profile & CV
-            </p>
-          </div>
-        ) : (
+        {/* Assigned Student Mentees (Teaching Faculty Only) */}
+        {!isNonTeaching && (
           <div
             onClick={() => {
               document.getElementById('dashboard-mentee-details')?.scrollIntoView({ behavior: 'smooth' });
@@ -176,7 +169,7 @@ export const FacultyDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* View Personal Timetable (Scrolls down to timetable directly in dashboard) */}
+        {/* View Personal Timetable / Lab Schedule */}
         <div
           onClick={() => {
             document.getElementById('dashboard-personal-timetable')?.scrollIntoView({ behavior: 'smooth' });
@@ -184,7 +177,9 @@ export const FacultyDashboard: React.FC = () => {
           className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-[#7B1113] transition-all hover:-translate-y-0.5"
         >
           <div className="flex items-center justify-between text-slate-500 mb-1">
-            <span className="text-xs font-semibold text-slate-700">View Personal Timetable</span>
+            <span className="text-xs font-semibold text-slate-700">
+              {isNonTeaching ? 'Lab & Work Schedule' : 'View Personal Timetable'}
+            </span>
             <Clock className="w-4 h-4 text-blue-600" />
           </div>
           <div className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5 mt-2">
@@ -192,56 +187,58 @@ export const FacultyDashboard: React.FC = () => {
             <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
           </div>
           <p className="text-[10px] text-slate-500 mt-1">
-            Click to view your personal timetable grid below
+            {isNonTeaching ? 'Click to view your weekly lab duty grid below' : 'Click to view your personal timetable grid below'}
           </p>
         </div>
       </div>
 
-      {/* Quick Access Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Quick Actions (AI Report Assistant replaced with Notifications & Circulars) */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
-          <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-            Faculty Quick Actions
-          </h2>
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => setActiveTab('portfolio')}
-              className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-slate-100 text-left transition-colors flex flex-col justify-between"
-            >
-              <FolderGit2 className="w-4 h-4 text-[#7B1113] mb-2" />
-              <div className="text-xs font-bold text-slate-900">Academic Portfolio</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">Public dossiers & folders</div>
-            </button>
+      {/* Quick Access Grid / Announcements */}
+      <div className={`grid grid-cols-1 ${isNonTeaching ? '' : 'md:grid-cols-2'} gap-6`}>
+        {/* Quick Actions (Teaching Faculty Only) */}
+        {!isNonTeaching && (
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
+            <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+              Faculty Quick Actions
+            </h2>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setActiveTab('portfolio')}
+                className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-slate-100 text-left transition-colors flex flex-col justify-between cursor-pointer"
+              >
+                <FolderGit2 className="w-4 h-4 text-[#7B1113] mb-2" />
+                <div className="text-xs font-bold text-slate-900">Academic Portfolio</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Public dossiers & folders</div>
+              </button>
 
-            <button
-              onClick={() => setActiveTab('mentees')}
-              className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-slate-100 text-left transition-colors flex flex-col justify-between"
-            >
-              <Network className="w-4 h-4 text-blue-600 mb-2" />
-              <div className="text-xs font-bold text-slate-900">Student Mentee Notebook</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">Parent contact & attendance remarks</div>
-            </button>
+              <button
+                onClick={() => setActiveTab('mentees')}
+                className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-slate-100 text-left transition-colors flex flex-col justify-between cursor-pointer"
+              >
+                <Network className="w-4 h-4 text-blue-600 mb-2" />
+                <div className="text-xs font-bold text-slate-900">Student Mentee Notebook</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Parent contact & attendance remarks</div>
+              </button>
 
-            <button
-              onClick={() => setActiveTab('timetables')}
-              className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-slate-100 text-left transition-colors flex flex-col justify-between"
-            >
-              <CalendarDays className="w-4 h-4 text-emerald-600 mb-2" />
-              <div className="text-xs font-bold text-slate-900">Class Timetables</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">Edit personal grid & export PDF</div>
-            </button>
+              <button
+                onClick={() => setActiveTab('timetables')}
+                className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-slate-100 text-left transition-colors flex flex-col justify-between cursor-pointer"
+              >
+                <CalendarDays className="w-4 h-4 text-emerald-600 mb-2" />
+                <div className="text-xs font-bold text-slate-900">Class Timetables</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Edit personal grid & export PDF</div>
+              </button>
 
-            <button
-              onClick={() => setActiveTab('notifications')}
-              className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-slate-100 text-left transition-colors flex flex-col justify-between"
-            >
-              <Bell className="w-4 h-4 text-amber-600 mb-2" />
-              <div className="text-xs font-bold text-slate-900">Notifications & Circulars</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">Official circulars & notices</div>
-            </button>
+              <button
+                onClick={() => setActiveTab('notifications')}
+                className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-slate-100 text-left transition-colors flex flex-col justify-between cursor-pointer"
+              >
+                <Bell className="w-4 h-4 text-amber-600 mb-2" />
+                <div className="text-xs font-bold text-slate-900">Notifications & Circulars</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Official circulars & notices</div>
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Latest Announcements */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
@@ -283,8 +280,8 @@ export const FacultyDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Year-Wise Mentee Students Details Section */}
-      {user?.role !== 'NON_TEACHING' && (
+      {/* Year-Wise Mentee Students Details Section (Teaching Faculty Only) */}
+      {!isNonTeaching && (
         <section id="dashboard-mentee-details" className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div>
@@ -404,10 +401,16 @@ export const FacultyDashboard: React.FC = () => {
             </div>
             <h2 className="text-base font-extrabold text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
               <Clock className="w-4.5 h-4.5 text-[#7B1113]" />
-              <span>My Personal Teaching Timetable (Saved Schedule)</span>
+              <span>
+                {isNonTeaching
+                  ? 'My Lab & Technical Work Schedule (Saved Schedule)'
+                  : 'My Personal Teaching Timetable (Saved Schedule)'}
+              </span>
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Weekly class timetable saved for your faculty account. To edit slots or export as PDF, access the full timetable editor.
+              {isNonTeaching
+                ? 'Weekly laboratory and technical duties schedule saved for your staff account. To edit slots, access the timetable editor.'
+                : 'Weekly class timetable saved for your faculty account. To edit slots or export as PDF, access the full timetable editor.'}
             </p>
           </div>
 

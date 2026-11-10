@@ -79,9 +79,26 @@ export const MentorAllocationView: React.FC = () => {
       .then((res) => (res.ok ? res.json() : []))
       .then((data: StaffProfile[]) => {
         if (Array.isArray(data)) {
-          setFacultyPool(data);
-          // By default, select all faculty
-          setSelectedMentorIds(data.map((f) => f.userId));
+          // Strictly exclude any non-teaching staff from mentor pool
+          const eligibleTeaching = data.filter((f: any) => {
+            const role = f.user?.role;
+            const isNonTeaching =
+              role === 'NON_TEACHING' ||
+              f.isTeachingFaculty === false ||
+              f.isMentorEligible === false ||
+              f.staffType === 'non-teaching' ||
+              (f.designation && (
+                f.designation.toLowerCase().includes('non-teaching') ||
+                f.designation.toLowerCase().includes('lab instructor') ||
+                f.designation.toLowerCase().includes('mechanic') ||
+                f.designation.toLowerCase().includes('attendant') ||
+                (f.designation.toLowerCase().includes('assistant') && !f.designation.toLowerCase().includes('professor'))
+              ));
+            return !isNonTeaching;
+          });
+          setFacultyPool(eligibleTeaching);
+          // By default, select all eligible teaching faculty
+          setSelectedMentorIds(eligibleTeaching.map((f) => f.userId));
         }
       })
       .catch((err) => console.error(err))

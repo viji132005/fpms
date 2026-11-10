@@ -1249,13 +1249,13 @@ apiRouter.get(
     }
 
     if (type === 'teaching') {
-      profiles = profiles.filter((p) => p.isTeachingFaculty);
+      profiles = profiles.filter((p) => p.isTeachingFaculty && p.user?.role !== 'NON_TEACHING');
     } else if (type === 'non-teaching') {
-      profiles = profiles.filter((p) => !p.isTeachingFaculty);
+      profiles = profiles.filter((p) => !p.isTeachingFaculty || p.user?.role === 'NON_TEACHING');
     }
 
     if (mentorOnly === 'true') {
-      profiles = profiles.filter((p) => p.isMentorEligible);
+      profiles = profiles.filter((p) => p.isMentorEligible && p.isTeachingFaculty && p.user?.role !== 'NON_TEACHING');
     }
 
     if (search) {
@@ -1458,6 +1458,11 @@ apiRouter.put(
 
     if (!profile) {
       return res.status(404).json({ error: 'Staff profile not found.' });
+    }
+
+    const targetUser = data.users.find((u) => u.id === userId);
+    if (!profile.isTeachingFaculty || targetUser?.role === 'NON_TEACHING') {
+      return res.status(400).json({ error: 'Non-teaching staff are not eligible to be assigned as mentors.' });
     }
 
     profile.isMentorEligible = !profile.isMentorEligible;
@@ -2304,7 +2309,7 @@ apiRouter.post(
     const currentYear = Number(studentYear);
     const currAcademicYear = academicYear || data.institution.currentAcademicYear;
 
-    // Build mentor list with eligibility
+    // Build mentor list with eligibility - teaching faculty only
     let eligibleFaculty = data.staffProfiles
       .filter((sp) => {
         const u = data.users.find((user) => user.id === sp.userId);
@@ -2312,7 +2317,9 @@ apiRouter.post(
           u !== undefined &&
           (u.departmentId === departmentId || !u.departmentId || u.departmentId === data.institution.defaultDepartmentId) &&
           u.status === 'ACTIVE' &&
-          sp.isTeachingFaculty
+          u.role !== 'NON_TEACHING' &&
+          sp.isTeachingFaculty === true &&
+          sp.isMentorEligible !== false
         );
       })
       .map((sp) => {
@@ -2408,14 +2415,20 @@ apiRouter.post(
       publishedByName,
       createdAt: new Date().toISOString(),
       allocationMode: allocationMode === 'RANDOM' ? 'RANDOM' : 'LINEAR',
-      groups: groups.map((g: any) => ({
-        mentorId: g.mentorId,
-        mentorName: g.mentorName,
-        staffId: g.staffId,
-        studentIds: Array.isArray(g.students)
-          ? g.students.map((s: any) => (typeof s === 'string' ? s : s.id))
-          : g.studentIds || [],
-      })),
+      groups: groups
+        .filter((g: any) => {
+          const u = data.users.find((usr) => usr.id === g.mentorId);
+          const sp = data.staffProfiles.find((prof) => prof.userId === g.mentorId);
+          return u?.role !== 'NON_TEACHING' && sp?.isTeachingFaculty !== false;
+        })
+        .map((g: any) => ({
+          mentorId: g.mentorId,
+          mentorName: g.mentorName,
+          staffId: g.staffId,
+          studentIds: Array.isArray(g.students)
+            ? g.students.map((s: any) => (typeof s === 'string' ? s : s.id))
+            : g.studentIds || [],
+        })),
     };
 
     if (existing) {
@@ -2561,6 +2574,15 @@ apiRouter.get(
   (req: AuthenticatedRequest, res: Response) => {
     const data = db.getData();
     const facultyUserId = req.user!.id;
+
+    // Non-teaching staff are not eligible as mentors and have zero mentees
+    if (req.user!.role === 'NON_TEACHING') {
+      return res.json([]);
+    }
+    const callerProfile = data.staffProfiles.find((sp) => sp.userId === facultyUserId);
+    if (callerProfile && callerProfile.isTeachingFaculty === false) {
+      return res.json([]);
+    }
 
     // Find all published allocations containing this mentor
     const mentees: {
@@ -4011,7 +4033,7 @@ apiRouter.get(
 
     let items = [...data.portfolioItems];
 
-    if (scope === 'mine' && currentUser.role === 'FACULTY') {
+    if (scope === 'mine' && (currentUser.role === 'FACULTY' || currentUser.role === 'NON_TEACHING')) {
       items = items.filter((p) => p.facultyUserId === currentUser.id);
     } else if (facultyUserId) {
       items = items.filter((p) => p.facultyUserId === String(facultyUserId));
@@ -4039,6 +4061,8 @@ const DEFAULT_PORTFOLIO_CATEGORIES = [
   'Honors & Awards',
   'Book Chapters & Monographs',
   'Consultancy & Industry Projects',
+  'Technical Training & Certifications',
+  'Laboratory Operations & Infrastructure',
 ];
 
 apiRouter.get(
@@ -4258,7 +4282,7 @@ apiRouter.get('/tasks', authMiddleware, (req: AuthenticatedRequest, res: Respons
 
   if (currentUser.role === 'HOD') {
     tasks = tasks.filter((t) => t.departmentId === currentUser.departmentId);
-  } else if (currentUser.role === 'FACULTY') {
+  } else if (currentUser.role === 'FACULTY' || currentUser.role === 'NON_TEACHING') {
     tasks = tasks.filter(
       (t) =>
         t.departmentId === currentUser.departmentId &&
@@ -4271,7 +4295,7 @@ apiRouter.get('/tasks', authMiddleware, (req: AuthenticatedRequest, res: Respons
   const tasksWithDetails = tasks.map((t) => {
     const submissions = data.taskSubmissions.filter((sub) => sub.taskId === t.id);
 
-    if (currentUser.role === 'FACULTY') {
+    if (currentUser.role === 'FACULTY' || currentUser.role === 'NON_TEACHING') {
       const mySubmission = submissions.find(
         (sub) => sub.facultyUserId === currentUser.id
       );
@@ -4438,7 +4462,7 @@ apiRouter.get(
 
     let submissions = data.taskSubmissions.filter((s) => s.taskId === taskId);
 
-    if (currentUser.role === 'FACULTY') {
+    if (currentUser.role === 'FACULTY' || currentUser.role === 'NON_TEACHING') {
       submissions = submissions.filter((s) => s.facultyUserId === currentUser.id);
     }
 
@@ -4449,7 +4473,7 @@ apiRouter.get(
 apiRouter.post(
   '/tasks/:taskId/submit',
   authMiddleware,
-  requireRole(['FACULTY']),
+  requireRole(['FACULTY', 'NON_TEACHING']),
   (req: AuthenticatedRequest, res: Response) => {
     const { taskId } = req.params;
     const { notes, fileUrl, fileName } = req.body;
@@ -5042,7 +5066,7 @@ apiRouter.get(
 
         // Direct recipient or broadcast
         if (n.recipientUserId === currentUser.id || n.recipientUserId === 'ALL') return true;
-        if (n.recipientUserId === 'FACULTY' && currentUser.role === 'FACULTY') return true;
+        if (n.recipientUserId === 'FACULTY' && (currentUser.role === 'FACULTY' || currentUser.role === 'NON_TEACHING')) return true;
 
         // Department-scoped circular
         if (n.recipientUserId && n.recipientUserId.startsWith('DEPT_')) {

@@ -107,6 +107,44 @@ test('generateStudentRosterPdf produces valid A4 Portrait college circular layou
   assert.strictEqual(rawPdfString.includes('Ref No:'), false, 'Should not contain Ref No:');
   assert.strictEqual(rawPdfString.includes('Sub: Official Student Enrolment Roll List'), false, 'Should not contain Sub: line');
   assert.strictEqual(rawPdfString.includes('Registered'), false, 'Should not contain Registered in candidate count');
+
+  // Must strictly display single current semester, never dual semesters
+  assert.ok(rawPdfString.includes('Sem 3'), 'Must display single active semester (Sem 3)');
+  assert.strictEqual(rawPdfString.includes('III & IV'), false, 'Must not display dual semesters (III & IV)');
+  assert.strictEqual(rawPdfString.includes('Sem 3 & 4'), false, 'Must not display dual semesters (Sem 3 & 4)');
+});
+
+test('generateStudentRosterPdf strictly displays only single current semester when dual semester label is passed', () => {
+  const singleCohortStudents: Student[] = [
+    {
+      id: 's-1',
+      usn: '4MH23IS001',
+      fullName: 'Ananya Rao',
+      departmentId: 'dept-ise',
+      admissionCohort: '2023',
+      currentYear: 3,
+      currentSemester: 5,
+      section: 'Section A',
+      email: '4mh23is001@mitmysore.in',
+      phone: '9845011111',
+      parentPhone: '9845022222',
+      status: 'ACTIVE',
+    },
+  ];
+
+  const doc = generateStudentRosterPdf(singleCohortStudents, {
+    cohortYearLabel: '3rd Year B.E.',
+    cohortSemesterLabel: 'Sem 5 & 6',
+    cohortLabel: '3rd Year Students',
+    deptCode: 'ISE',
+    departmentName: 'Department of Information Science and Engineering',
+    academicYear: '2026-27',
+  });
+
+  const rawPdfString = doc.output();
+  assert.ok(rawPdfString.includes('Sem 5'), 'Must display only current semester (Sem 5)');
+  assert.strictEqual(rawPdfString.includes('Sem 5 & 6'), false, 'Must not show dual semesters (Sem 5 & 6)');
+  assert.strictEqual(rawPdfString.includes('& 6'), false, 'Must not show & 6');
 });
 
 test('generateAttendanceFormPdf produces valid 4-column A4 Portrait event attendance form', () => {

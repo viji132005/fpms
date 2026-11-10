@@ -108,11 +108,45 @@ export function generateStudentRosterPdf(
     .replace(/\(.*?\)/g, '')
     .trim() || cohortYearLabel;
 
-  const cleanSem = cohortSemesterLabel
+  let cleanSem = cohortSemesterLabel
     .replace(/\(.*?\)/g, '')
     .replace(/Semester(s)?/gi, 'Sem')
     .replace(/Consolidated Roll/gi, '')
     .trim() || cohortSemesterLabel;
+
+  // Single semester enforcement: resolve dual semesters (e.g. "Sem 3 & 4" or "III & IV") to only the current semester
+  const distinctStudentSems = Array.from(
+    new Set(students.map((s) => s.currentSemester).filter((s): s is number => typeof s === 'number' && s > 0))
+  );
+
+  if (distinctStudentSems.length === 1) {
+    cleanSem = `Sem ${distinctStudentSems[0]}`;
+  } else if (cleanSem.includes('&')) {
+    cleanSem = cleanSem.split('&')[0].trim();
+  } else if (cleanSem.toLowerCase().includes('and')) {
+    cleanSem = cleanSem.split(/and/i)[0].trim();
+  }
+
+  // Normalize Roman numeral or standalone digit to standard "Sem X"
+  const romanMap: Record<string, number> = {
+    VIII: 8, VII: 7, VI: 6, V: 5, IV: 4, III: 3, II: 2, I: 1
+  };
+  const romanMatch = cleanSem.match(/\b(VIII|VII|VI|IV|V|III|II|I)\b/i);
+  if (romanMatch && !cleanSem.match(/\b\d\b/)) {
+    const num = romanMap[romanMatch[1].toUpperCase()];
+    if (num) {
+      cleanSem = `Sem ${num}`;
+    }
+  } else if (
+    !cleanSem.toLowerCase().startsWith('sem') &&
+    !cleanSem.toLowerCase().includes('alumni') &&
+    !cleanSem.toLowerCase().includes('all')
+  ) {
+    const numMatch = cleanSem.match(/\d+/);
+    if (numMatch) {
+      cleanSem = `Sem ${numMatch[0]}`;
+    }
+  }
 
   const renderHeader = (isContinuation = false) => {
     currentY = topMargin;
@@ -248,7 +282,7 @@ export function generateStudentRosterPdf(
       doc.setFontSize(7.5);
       doc.setTextColor(100, 116, 139);
       doc.text(
-        `Roll List: ${cohortYearLabel} (${cohortSemesterLabel}) — CONTINUED`,
+        `Roll List: ${cleanYear} (${cleanSem}) — CONTINUED`,
         pageWidth - rightMargin,
         currentY + 3,
         { align: 'right' }

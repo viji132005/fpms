@@ -20,6 +20,7 @@ import {
   Download,
 } from 'lucide-react';
 import { FacultyRegistrationModal } from '../components/FacultyRegistrationModal.tsx';
+import { PdfCanvasViewer } from '../components/PdfCanvasViewer.tsx';
 
 export const AdminDashboard: React.FC = () => {
   const { department: contextDept, user, profile } = useAuth();
@@ -240,11 +241,15 @@ export const AdminDashboard: React.FC = () => {
             <p className="text-xs text-rose-100 mt-1 max-w-xl">
               {profile?.designation || 'Professor & Head of Department'} · {profile?.qualification || 'Ph.D, M.Tech'}
             </p>
-            {/* Email only */}
+            {/* Email & Phone */}
             <div className="mt-3 flex items-center gap-3 flex-wrap text-xs text-rose-100">
               <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
                 <Mail className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                 <span>{user?.email || (profile as any)?.email || 'hod.ise@mitmysore.in'}</span>
+              </span>
+              <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
+                <Phone className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span>{profile?.phone || (user as any)?.phone || (deptInfo as any)?.hod?.phone || '9845012345'}</span>
               </span>
             </div>
           </div>
@@ -284,7 +289,7 @@ export const AdminDashboard: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <div className="text-right">
               <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                 Operating Department
@@ -673,12 +678,22 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </div>
-            <div className="flex-1 p-4 bg-slate-100 overflow-auto min-h-[500px]">
-              <iframe
-                src={previewCv.url}
-                className="w-full h-[70vh] rounded-lg border border-slate-300 bg-white"
-                title={previewCv.name}
-              />
+            <div className="flex-1 p-4 bg-slate-100 overflow-auto min-h-[500px] flex items-center justify-center">
+              {previewCv.url.startsWith('data:image/') || previewCv.name.match(/\.(png|jpe?g|webp|gif)$/i) ? (
+                <img
+                  src={previewCv.url}
+                  alt={previewCv.name}
+                  className="max-w-full max-h-[70vh] object-contain rounded-lg shadow border border-slate-200 bg-white"
+                />
+              ) : (
+                <div className="w-full h-[70vh] flex flex-col">
+                  <PdfCanvasViewer
+                    url={previewCv.url}
+                    originalUrl={previewCv.url}
+                    fileName={previewCv.name}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>

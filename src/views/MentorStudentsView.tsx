@@ -58,6 +58,20 @@ export const MentorStudentsView: React.FC = () => {
 
   const countYear = (y: number) => mentees.filter((m) => m.studentYear === y).length;
   const countYear2 = countYear(2);
+
+  if (user?.role === 'NON_TEACHING' || profile?.isTeachingFaculty === false) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-3">
+        <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-500">
+          <Network className="w-6 h-6 text-slate-400" />
+        </div>
+        <h2 className="text-base font-bold text-slate-800">Student Mentorship Not Applicable</h2>
+        <p className="text-xs text-slate-500 max-w-md mx-auto">
+          As per institutional academic policy, non-teaching faculty and technical staff are not assigned student mentoring cohorts.
+        </p>
+      </div>
+    );
+  }
   const countYear3 = countYear(3);
   const countYear4 = countYear(4);
   const countYear1 = countYear(1);

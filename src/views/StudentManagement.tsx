@@ -459,17 +459,19 @@ export const StudentManagement: React.FC = () => {
         ? '3rd Year'
         : '4th Year';
 
+      // Determine single current running semester (strictly one semester, not both)
+      const distinctActiveSems = Array.from(
+        new Set(data.map((s) => s.currentSemester).filter((s): s is number => typeof s === 'number' && s > 0))
+      );
+      const currentSemNumber = distinctActiveSems.length === 1
+        ? distinctActiveSems[0]
+        : activeRunningSem || (typeof activeTab === 'number' ? (deptYearStats[activeTab]?.activeSem || (currentDeptCycle === 'EVEN' ? activeTab * 2 : activeTab * 2 - 1)) : null);
+
       const cohortSemesterLabel = isAll
-        ? 'Sem 1 - 8'
+        ? 'All Semesters'
         : activeTab === 'graduated'
         ? 'Alumni'
-        : activeTab === 1
-        ? 'Sem 1 & 2'
-        : activeTab === 2
-        ? 'Sem 3 & 4'
-        : activeTab === 3
-        ? 'Sem 5 & 6'
-        : 'Sem 7 & 8';
+        : `Sem ${currentSemNumber || (activeTab === 1 ? 1 : activeTab === 2 ? 3 : activeTab === 3 ? 5 : 7)}`;
 
       if (exportFormat === 'excel') {
         const exportData = formatStudentExcelData(data);

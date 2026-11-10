@@ -26,7 +26,7 @@ import { MasterAdminAcademicYearView } from './views/MasterAdminAcademicYearView
 import { StudentSectionAllocationView } from './views/StudentSectionAllocationView.tsx';
 
 function MainApp() {
-  const { user, activeTab, isLoading, isMasterAdmin } = useAuth();
+  const { user, profile, activeTab, isLoading, isMasterAdmin } = useAuth();
   const [showLogin, setShowLogin] = useState<boolean>(false);
 
   if (isLoading) {
@@ -100,7 +100,11 @@ function MainApp() {
       case 'department-portfolio':
         return <FacultyPortfolioView />;
       case 'mentees':
-        return <MentorStudentsView />;
+        return user.role === 'NON_TEACHING' || (profile && profile.isTeachingFaculty === false) ? (
+          <FacultyDashboard />
+        ) : (
+          <MentorStudentsView />
+        );
       case 'feed':
         return <AcademicFeedView />;
       case 'notifications':
